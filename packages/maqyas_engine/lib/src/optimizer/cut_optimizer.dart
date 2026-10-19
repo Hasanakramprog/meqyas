@@ -42,6 +42,7 @@ class CutOptimizer {
     }
 
     final allBarPlans = <BarCuttingPlan>[];
+    final allOversizedCuts = <PlannedCut>[];
     var globalBarIndex = 1;
 
     for (final entry in grouped.entries) {
@@ -72,9 +73,8 @@ class CutOptimizer {
 
       for (final cut in individualCuts) {
         if (cut.lengthCm > usableBarLengthCm) {
-          throw ArgumentError(
-            'Cut piece length (${cut.lengthCm} cm) exceeds usable stock bar length ($usableBarLengthCm cm). Cannot cut.',
-          );
+          allOversizedCuts.add(cut);
+          continue;
         }
 
         // Find first bar that can accommodate this cut
@@ -154,7 +154,11 @@ class CutOptimizer {
       scrapPercentage: scrapPercentage,
     );
 
-    return OptimizationResult(barPlans: allBarPlans, summary: summary);
+    return OptimizationResult(
+      barPlans: allBarPlans,
+      summary: summary,
+      oversizedCuts: allOversizedCuts,
+    );
   }
 }
 

@@ -27,6 +27,31 @@ class BarLayoutView extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        if (optResult.hasOversizedCuts)
+          Container(
+            margin: const EdgeInsets.only(bottom: 12),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: AppColors.error.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: AppColors.error),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.warning_amber_rounded, color: AppColors.error),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'تنبيه: توجد قطع تتجاوز طول القضيب المتاح (656 سم): ${optResult.oversizedCuts.map((c) => "${c.nameArabic}: ${c.lengthCm.toStringAsFixed(1)}سم").join("، ")}. يرجى التحقق من أبعاد القياس.',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: AppColors.error,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
         // Summary KPI Card
         Card(
           child: Padding(

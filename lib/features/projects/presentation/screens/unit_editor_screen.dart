@@ -309,6 +309,7 @@ class _UnitEditorScreenState extends ConsumerState<UnitEditorScreen>
                     children: [
                       Expanded(
                         child: DropdownButtonFormField<String>(
+                          isExpanded: true,
                           initialValue: state.unitType,
                           decoration: const InputDecoration(labelText: 'نوع الوحدة'),
                           items: const [
@@ -323,6 +324,7 @@ class _UnitEditorScreenState extends ConsumerState<UnitEditorScreen>
                       const SizedBox(width: 12),
                       Expanded(
                         child: DropdownButtonFormField<String>(
+                          isExpanded: true,
                           initialValue: state.glazingMode,
                           decoration: const InputDecoration(labelText: 'نوع تركيب الزجاج'),
                           items: const [
@@ -339,40 +341,37 @@ class _UnitEditorScreenState extends ConsumerState<UnitEditorScreen>
 
                   const SizedBox(height: 12),
 
-                  // Sash Count & Flyscreen
-                  Row(
-                    children: [
-                      Expanded(
-                        child: DropdownButtonFormField<int>(
-                          initialValue: state.sashCount,
-                          decoration: const InputDecoration(labelText: 'عدد الدرف (السحاب)'),
-                          items: const [
-                            DropdownMenuItem(value: 2, child: Text('درفتان (2 sashes)')),
-                            DropdownMenuItem(value: 3, child: Text('3 درف')),
-                            DropdownMenuItem(value: 4, child: Text('4 درف')),
-                          ],
-                          onChanged: (val) {
-                            if (val != null) notifier.updateOptions(sashCount: val);
-                          },
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: SwitchListTile(
-                          contentPadding: EdgeInsets.zero,
-                          title: const Text('درفة منخل (شبك)', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                          value: state.hasScreen,
-                          activeTrackColor: AppColors.amberPrimary,
-                          onChanged: (val) => notifier.updateOptions(hasScreen: val),
-                        ),
-                      ),
+                  // Sash Count
+                  DropdownButtonFormField<int>(
+                    isExpanded: true,
+                    initialValue: state.sashCount,
+                    decoration: const InputDecoration(labelText: 'عدد الدرف (السحاب)'),
+                    items: const [
+                      DropdownMenuItem(value: 2, child: Text('درفتان (2 sashes)')),
+                      DropdownMenuItem(value: 3, child: Text('3 درف')),
+                      DropdownMenuItem(value: 4, child: Text('4 درف')),
                     ],
+                    onChanged: (val) {
+                      if (val != null) notifier.updateOptions(sashCount: val);
+                    },
+                  ),
+
+                  const SizedBox(height: 8),
+
+                  // Flyscreen Toggle
+                  SwitchListTile(
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+                    title: const Text('درفة منخل (شبك مقاوم للحشرات)', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                    value: state.hasScreen,
+                    activeTrackColor: AppColors.amberPrimary,
+                    onChanged: (val) => notifier.updateOptions(hasScreen: val),
                   ),
 
                   const SizedBox(height: 12),
 
                   // Sharh Options
                   DropdownButtonFormField<String>(
+                    isExpanded: true,
                     initialValue: state.sharhOption,
                     decoration: const InputDecoration(labelText: 'خيار الشرح (تعديل الأجناب للبروز الحجري)'),
                     items: const [

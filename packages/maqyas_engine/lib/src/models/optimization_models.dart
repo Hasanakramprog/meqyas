@@ -70,9 +70,13 @@ class OptimizationSummary {
 class OptimizationResult {
   final List<BarCuttingPlan> barPlans;
   final OptimizationSummary summary;
+  final List<PlannedCut> oversizedCuts;
 
   const OptimizationResult({
     required this.barPlans,
     required this.summary,
+    this.oversizedCuts = const [],
   });
+
+  bool get hasOversizedCuts => oversizedCuts.isNotEmpty;
 }
