@@ -12,6 +12,10 @@ import '../../features/dashboard/presentation/admin_dashboard_screen.dart';
 import '../../features/dashboard/presentation/owner_dashboard_screen.dart';
 import '../../features/dashboard/presentation/supplier_dashboard_screen.dart';
 import '../../features/home/presentation/home_screen.dart';
+import '../../features/projects/domain/models/project_unit.dart';
+import '../../features/projects/presentation/screens/project_detail_screen.dart';
+import '../../features/projects/presentation/screens/projects_list_screen.dart';
+import '../../features/projects/presentation/screens/unit_editor_screen.dart';
 
 class RouterNotifier extends ChangeNotifier {
   final Ref _ref;
@@ -135,6 +139,42 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: '/dashboard/owner',
         name: 'owner_dashboard',
         builder: (context, state) => const OwnerDashboardScreen(),
+        routes: [
+          GoRoute(
+            path: 'projects',
+            name: 'owner_projects',
+            builder: (context, state) => const ProjectsListScreen(),
+            routes: [
+              GoRoute(
+                path: ':projectId',
+                name: 'project_detail',
+                builder: (context, state) {
+                  final projectId = state.pathParameters['projectId']!;
+                  return ProjectDetailScreen(projectId: projectId);
+                },
+                routes: [
+                  GoRoute(
+                    path: 'units/new',
+                    name: 'new_unit',
+                    builder: (context, state) {
+                      final projectId = state.pathParameters['projectId']!;
+                      return UnitEditorScreen(projectId: projectId);
+                    },
+                  ),
+                  GoRoute(
+                    path: 'units/:unitId',
+                    name: 'edit_unit',
+                    builder: (context, state) {
+                      final projectId = state.pathParameters['projectId']!;
+                      final unit = state.extra as ProjectUnit?;
+                      return UnitEditorScreen(projectId: projectId, initialUnit: unit);
+                    },
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ],
       ),
       GoRoute(
         path: '/dashboard/supplier',
