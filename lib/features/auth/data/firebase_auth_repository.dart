@@ -163,19 +163,30 @@ class FirebaseAuthRepository implements AuthRepository {
       await user.reload();
       await user.getIdToken(true);
       final refreshed = _auth.currentUser;
-      if (_currentUser != null && refreshed != null) {
-        _currentUser = AppUser(
-          uid: _currentUser!.uid,
-          email: _currentUser!.email,
-          fullName: _currentUser!.fullName,
-          phone: _currentUser!.phone,
-          phoneVerifiedAt: _currentUser!.phoneVerifiedAt,
-          isEmailVerified: refreshed.emailVerified,
-          role: _currentUser!.role,
-          status: _currentUser!.status,
-          workshopId: _currentUser!.workshopId,
-          supplierId: _currentUser!.supplierId,
-        );
+      if (refreshed != null) {
+        if (_currentUser != null) {
+          _currentUser = AppUser(
+            uid: _currentUser!.uid,
+            email: _currentUser!.email,
+            fullName: _currentUser!.fullName,
+            phone: _currentUser!.phone,
+            phoneVerifiedAt: _currentUser!.phoneVerifiedAt,
+            isEmailVerified: refreshed.emailVerified,
+            role: _currentUser!.role,
+            status: _currentUser!.status,
+            workshopId: _currentUser!.workshopId,
+            supplierId: _currentUser!.supplierId,
+          );
+        } else {
+          _currentUser = AppUser(
+            uid: refreshed.uid,
+            email: refreshed.email ?? '',
+            fullName: refreshed.displayName ?? '',
+            phone: '',
+            isEmailVerified: refreshed.emailVerified,
+            role: UserRole.owner,
+          );
+        }
         _authStateController.add(_currentUser);
       }
     }
