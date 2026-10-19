@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:maqyas_engine/maqyas_engine.dart';
 import 'package:meqyas/app/theme/app_colors.dart';
 import 'package:meqyas/features/auth/presentation/controllers/auth_controller.dart';
 import '../../data/projects_repository.dart';
@@ -71,6 +72,28 @@ class _QuickEntrySheetState extends ConsumerState<QuickEntrySheet> {
     if (height == null || height <= 0) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('يرجى إدخال ارتفاع صحيح أكبر من صفر')),
+      );
+      return;
+    }
+
+    // Engineering Validation (Never allow unmanufacturable dimensions)
+    const engine = CalculatorEngine();
+    final spec = UnitSpecification(
+      widthCm: width,
+      heightCm: height,
+      quantity: _quantity,
+      unitType: _unitType,
+      profileSystemId: SeedRules.system2000Beaded,
+    );
+    final calc = engine.calculate(spec);
+    if (!calc.isValid) {
+      final firstIssue = calc.issues.isNotEmpty ? calc.issues.first.message : 'الأبعاد غير مطابقة لقواعد التصنيع';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('القياس غير صالح للتصنيع: $firstIssue\n(الحد الأدنى: العرض > 16.2 سم، الارتفاع > 14 سم)'),
+          backgroundColor: AppColors.error,
+          duration: const Duration(seconds: 4),
+        ),
       );
       return;
     }
