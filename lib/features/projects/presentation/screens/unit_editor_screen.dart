@@ -31,6 +31,7 @@ class _UnitEditorScreenState extends ConsumerState<UnitEditorScreen>
   late final TextEditingController _heightController;
   late final TextEditingController _nameController;
   late final TextEditingController _locationController;
+  bool _isCanvasExpanded = true;
 
   @override
   void initState() {
@@ -105,31 +106,111 @@ class _UnitEditorScreenState extends ConsumerState<UnitEditorScreen>
           const SizedBox(width: 8),
         ],
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 1000),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                // 1. Interactive 2D CAD Canvas
-                SizedBox(
-                  height: 320,
-                  child: WindowDrawingCanvas(
-                    widthCm: state.widthCm,
-                    heightCm: state.heightCm,
-                    sashCount: state.sashCount,
-                    hasScreen: state.hasScreen,
-                    unitType: state.unitType,
-                    glazingMode: state.glazingMode,
-                  ),
-                ),
+      body: Column(
+        children: [
+          // 1. Interactive 2D CAD Canvas (Collapsible for maximum workspace)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 1000),
+                child: _isCanvasExpanded
+                    ? SizedBox(
+                        height: 240,
+                        child: Stack(
+                          children: [
+                            Positioned.fill(
+                              child: WindowDrawingCanvas(
+                                widthCm: state.widthCm,
+                                heightCm: state.heightCm,
+                                sashCount: state.sashCount,
+                                hasScreen: state.hasScreen,
+                                unitType: state.unitType,
+                                glazingMode: state.glazingMode,
+                              ),
+                            ),
+                            Positioned(
+                              top: 8,
+                              left: 8,
+                              child: Tooltip(
+                                message: 'تصغير المخطط لمساحة أكبر',
+                                child: InkWell(
+                                  onTap: () => setState(() => _isCanvasExpanded = false),
+                                  borderRadius: BorderRadius.circular(8),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                    decoration: BoxDecoration(
+                                      color: (isDark ? Colors.black : Colors.white).withValues(alpha: 0.8),
+                                      borderRadius: BorderRadius.circular(8),
+                                      border: Border.all(
+                                        color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+                                      ),
+                                    ),
+                                    child: const Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(Icons.unfold_less_rounded, size: 16, color: AppColors.amberPrimary),
+                                        SizedBox(width: 4),
+                                        Text('تصغير', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      )
+                    : Container(
+                        height: 42,
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        decoration: BoxDecoration(
+                          color: isDark ? AppColors.darkCard : AppColors.lightSurface,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: isDark ? AppColors.darkBorder : AppColors.lightBorder),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.architecture_rounded, size: 18, color: AppColors.amberPrimary),
+                            const SizedBox(width: 8),
+                            Text(
+                              'المخطط: ${state.widthCm.toStringAsFixed(1)} × ${state.heightCm.toStringAsFixed(1)} سم (${state.sashCount} درف)',
+                              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                            ),
+                            const Spacer(),
+                            InkWell(
+                              onTap: () => setState(() => _isCanvasExpanded = true),
+                              borderRadius: BorderRadius.circular(6),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: AppColors.amberPrimary.withValues(alpha: 0.15),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: const Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.unfold_more_rounded, size: 14, color: AppColors.amberPrimary),
+                                    SizedBox(width: 4),
+                                    Text('عرض الرسم', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.amberPrimary)),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+              ),
+            ),
+          ),
 
-                const SizedBox(height: 16),
-
-                // 2. Navigation Studio Tabs
-                Container(
+          // 2. Navigation Studio Tabs
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 1000),
+                child: Container(
                   decoration: BoxDecoration(
                     color: isDark ? AppColors.darkCard : AppColors.lightSurface,
                     borderRadius: BorderRadius.circular(12),
@@ -150,25 +231,43 @@ class _UnitEditorScreenState extends ConsumerState<UnitEditorScreen>
                     ],
                   ),
                 ),
+              ),
+            ),
+          ),
 
-                const SizedBox(height: 16),
-
-                // 3. Tab Body
-                SizedBox(
-                  height: 600,
-                  child: TabBarView(
-                    controller: _tabController,
-                    children: [
-                      _buildConfigurationTab(context, state, notifier, isDark),
-                      SingleChildScrollView(child: CuttingListView(result: state.calculationResult)),
-                      SingleChildScrollView(child: BarLayoutView(pieces: state.calculationResult.pieces)),
-                      SingleChildScrollView(child: AccessoriesSummaryView(accessories: state.calculationResult.accessories)),
-                    ],
-                  ),
+          // 3. Tab Body
+          Expanded(
+            child: TabBarView(
+              controller: _tabController,
+              children: [
+                _buildScrollableTab(
+                  child: _buildConfigurationTab(context, state, notifier, isDark),
+                ),
+                _buildScrollableTab(
+                  child: CuttingListView(result: state.calculationResult),
+                ),
+                _buildScrollableTab(
+                  child: BarLayoutView(pieces: state.calculationResult.pieces),
+                ),
+                _buildScrollableTab(
+                  child: AccessoriesSummaryView(accessories: state.calculationResult.accessories),
                 ),
               ],
             ),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildScrollableTab({required Widget child}) {
+    return SingleChildScrollView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.all(16),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 1000),
+          child: child,
         ),
       ),
     );
@@ -180,9 +279,8 @@ class _UnitEditorScreenState extends ConsumerState<UnitEditorScreen>
     UnitEditorNotifier notifier,
     bool isDark,
   ) {
-    return SingleChildScrollView(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           // Identifiers (Name & Location)
           Card(
@@ -388,7 +486,6 @@ class _UnitEditorScreenState extends ConsumerState<UnitEditorScreen>
             ),
           ),
         ],
-      ),
-    );
+      );
   }
 }
