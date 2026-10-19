@@ -7,6 +7,7 @@ class CutPiece {
   final double cutAngleRight; // e.g. 90.0 or 45.0
   final String profileType; // 'track', 'jamb', 'sash', 'screen', 'bead'
   final String? ruleVersionId;
+  final String? unitTag; // e.g. "W1", "شباك 1"
 
   const CutPiece({
     required this.itemCode,
@@ -17,12 +18,13 @@ class CutPiece {
     this.cutAngleRight = 90.0,
     required this.profileType,
     this.ruleVersionId,
+    this.unitTag,
   });
 
   double get totalLengthCm => lengthCm * quantity;
 
   @override
-  String toString() => '$nameArabic ($itemCode): ${lengthCm.toStringAsFixed(2)} cm x $quantity';
+  String toString() => '$nameArabic ($itemCode): ${lengthCm.toStringAsFixed(2)} cm x $quantity${unitTag != null ? " [$unitTag]" : ""}';
 }
 
 class GlassSpecification {

@@ -220,6 +220,9 @@ class BarLayoutView extends StatelessWidget {
                     // Cut pieces
                     ...bar.cuts.map((cut) {
                       final flex = (cut.lengthCm * 10).toInt();
+                      final label = cut.unitTag != null && cut.unitTag!.isNotEmpty
+                          ? '${cut.lengthCm.toInt()} (${cut.unitTag})'
+                          : '${cut.lengthCm.toInt()} سم';
                       return Expanded(
                         flex: flex > 0 ? flex : 1,
                         child: Container(
@@ -227,10 +230,10 @@ class BarLayoutView extends StatelessWidget {
                           color: AppColors.glassBlue.withValues(alpha: isDark ? 0.7 : 0.8),
                           alignment: Alignment.center,
                           child: Text(
-                            '${cut.lengthCm.toInt()} سم',
+                            label,
                             style: const TextStyle(
                               color: Colors.white,
-                              fontSize: 10,
+                              fontSize: 9.5,
                               fontWeight: FontWeight.w700,
                             ),
                             overflow: TextOverflow.ellipsis,
@@ -262,6 +265,55 @@ class BarLayoutView extends StatelessWidget {
                   ],
                 ),
               ),
+            ),
+
+            const SizedBox(height: 10),
+
+            // Sequential Cut Chips for Workshop Floor Saw Operators
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: bar.cuts.map((cut) {
+                return Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: isDark ? AppColors.darkSurface : AppColors.lightBackground,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(
+                      color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.content_cut_rounded, size: 12, color: AppColors.amberPrimary),
+                      const SizedBox(width: 4),
+                      Text(
+                        '${cut.lengthCm.toStringAsFixed(1)} سم',
+                        style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 11, color: AppColors.amberPrimary),
+                      ),
+                      if (cut.unitTag != null && cut.unitTag!.isNotEmpty) ...[
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                          decoration: BoxDecoration(
+                            color: AppColors.glassBlue.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            cut.unitTag!,
+                            style: const TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.glassBlueLight,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                );
+              }).toList(),
             ),
           ],
         ),

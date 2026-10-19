@@ -327,7 +327,9 @@ class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> with 
 
     const engine = CalculatorEngine();
     final allPieces = <CutPiece>[];
-    for (final u in units) {
+    for (var uIdx = 0; uIdx < units.length; uIdx++) {
+      final u = units[uIdx];
+      final unitLabel = u.name.trim().isNotEmpty ? u.name.trim() : 'W${uIdx + 1}';
       final res = engine.calculate(u.toEngineSpec());
       for (final p in res.pieces) {
         allPieces.add(
@@ -337,6 +339,7 @@ class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> with 
             lengthCm: p.lengthCm,
             quantity: p.quantity * u.quantity,
             profileType: p.profileType,
+            unitTag: unitLabel,
           ),
         );
       }

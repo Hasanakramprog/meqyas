@@ -60,6 +60,7 @@ class CutOptimizer {
               nameArabic: p.nameArabic,
               lengthCm: p.lengthCm,
               pieceIndex: cutIdx++,
+              unitTag: p.unitTag,
             ),
           );
         }

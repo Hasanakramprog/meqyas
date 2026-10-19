@@ -3,12 +3,14 @@ class PlannedCut {
   final String nameArabic;
   final double lengthCm;
   final int pieceIndex; // index in overall plan
+  final String? unitTag; // e.g. "W1", "شباك 1"
 
   const PlannedCut({
     required this.itemCode,
     required this.nameArabic,
     required this.lengthCm,
     required this.pieceIndex,
+    this.unitTag,
   });
 }
 
