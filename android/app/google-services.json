@@ -7,7 +7,7 @@
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:100000000000:android:meqyas-demo-app-id",
+        "mobilesdk_app_id": "1:100000000000:android:a1b2c3d4e5f60718",
         "android_client_info": {
           "package_name": "com.meqyas.meqyas"
         }

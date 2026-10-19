@@ -20,7 +20,7 @@ class FirebaseConfig {
         defaultTargetPlatform == TargetPlatform.macOS) {
       return const FirebaseOptions(
         apiKey: 'AIzaSyDemo-MeqyasFakeApiKeyForEmulator123',
-        appId: '1:100000000000:ios:meqyas-demo-app-id',
+        appId: '1:100000000000:ios:a1b2c3d4e5f60718',
         messagingSenderId: '100000000000',
         projectId: 'demo-meqyas',
         storageBucket: 'demo-meqyas.appspot.com',
