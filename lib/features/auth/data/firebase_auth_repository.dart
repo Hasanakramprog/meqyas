@@ -160,8 +160,17 @@ class FirebaseAuthRepository implements AuthRepository {
   Future<void> reloadUser() async {
     final user = _auth.currentUser;
     if (user != null) {
-      await user.reload();
-      await user.getIdToken(true);
+      try {
+        await user.reload();
+        await user.getIdToken(true);
+      } catch (e) {
+        debugPrint('reloadUser failed (user likely deleted or session expired): $e');
+        if (e.toString().contains('user-token-expired') ||
+            e.toString().contains('user-not-found')) {
+          await signOut();
+          return;
+        }
+      }
       final refreshed = _auth.currentUser;
       if (refreshed != null) {
         if (_currentUser != null) {
