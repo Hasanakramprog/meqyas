@@ -231,12 +231,14 @@ class _UnitEditorScreenState extends ConsumerState<UnitEditorScreen>
                   Row(
                     children: [
                       Expanded(
+                        flex: 4,
                         child: TextField(
                           controller: _widthController,
                           keyboardType: const TextInputType.numberWithOptions(decimal: true),
                           decoration: const InputDecoration(
                             labelText: 'العرض الخارجي W (سم)',
                             suffixText: 'سم',
+                            contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 12),
                           ),
                           onChanged: (val) {
                             final w = double.tryParse(val);
@@ -246,14 +248,16 @@ class _UnitEditorScreenState extends ConsumerState<UnitEditorScreen>
                           },
                         ),
                       ),
-                      const SizedBox(width: 12),
+                      const SizedBox(width: 8),
                       Expanded(
+                        flex: 4,
                         child: TextField(
                           controller: _heightController,
                           keyboardType: const TextInputType.numberWithOptions(decimal: true),
                           decoration: const InputDecoration(
                             labelText: 'الارتفاع الخارجي H (سم)',
                             suffixText: 'سم',
+                            contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 12),
                           ),
                           onChanged: (val) {
                             final h = double.tryParse(val);
@@ -263,12 +267,16 @@ class _UnitEditorScreenState extends ConsumerState<UnitEditorScreen>
                           },
                         ),
                       ),
-                      const SizedBox(width: 12),
-                      SizedBox(
-                        width: 90,
+                      const SizedBox(width: 8),
+                      Expanded(
+                        flex: 3,
                         child: DropdownButtonFormField<int>(
+                          isExpanded: true,
                           initialValue: state.quantity,
-                          decoration: const InputDecoration(labelText: 'الكمية'),
+                          decoration: const InputDecoration(
+                            labelText: 'الكمية',
+                            contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                          ),
                           items: List.generate(20, (i) => i + 1)
                               .map((q) => DropdownMenuItem(value: q, child: Text('$q')))
                               .toList(),

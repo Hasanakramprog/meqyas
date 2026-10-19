@@ -181,26 +181,40 @@ class _QuickEntrySheetState extends ConsumerState<QuickEntrySheet> {
           Row(
             children: [
               Expanded(
+                flex: 4,
                 child: TextField(
                   controller: _widthController,
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  decoration: const InputDecoration(labelText: 'العرض (سم) *', suffixText: 'سم'),
+                  decoration: const InputDecoration(
+                    labelText: 'العرض (سم) *',
+                    suffixText: 'سم',
+                    contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+                  ),
                 ),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 8),
               Expanded(
+                flex: 4,
                 child: TextField(
                   controller: _heightController,
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  decoration: const InputDecoration(labelText: 'الارتفاع (سم) *', suffixText: 'سم'),
+                  decoration: const InputDecoration(
+                    labelText: 'الارتفاع (سم) *',
+                    suffixText: 'سم',
+                    contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+                  ),
                 ),
               ),
-              const SizedBox(width: 10),
-              SizedBox(
-                width: 75,
+              const SizedBox(width: 8),
+              Expanded(
+                flex: 3,
                 child: DropdownButtonFormField<int>(
+                  isExpanded: true,
                   initialValue: _quantity,
-                  decoration: const InputDecoration(labelText: 'العدد'),
+                  decoration: const InputDecoration(
+                    labelText: 'العدد',
+                    contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                  ),
                   items: List.generate(20, (i) => i + 1)
                       .map((q) => DropdownMenuItem(value: q, child: Text('$q')))
                       .toList(),
