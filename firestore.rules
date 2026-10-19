@@ -1,0 +1,122 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Auth Helpers
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function userToken() {
+      return request.auth.token;
+    }
+    
+    function role() {
+      return userToken().role;
+    }
+    
+    function isActive() {
+      return isSignedIn() && userToken().status != 'disabled';
+    }
+    
+    function isAdmin() {
+      return isActive() && role() == 'admin';
+    }
+    
+    function isOwnerOf(workshopId) {
+      return isActive() && role() == 'owner' && userToken().workshopId == workshopId;
+    }
+    
+    function isSupplier(supplierId) {
+      return isActive() && role() == 'supplier' && userToken().supplierId == supplierId;
+    }
+
+    // Users collection
+    match /users/{uid} {
+      allow read: if isSignedIn() && (request.auth.uid == uid || isAdmin());
+      // Status and role are strictly set by Cloud Functions
+      allow write: if false;
+    }
+
+    // Workshops and their subcollections
+    match /workshops/{workshopId} {
+      allow read, write: if isOwnerOf(workshopId) || isAdmin();
+
+      match /{subcollection=**} {
+        allow read, write: if isOwnerOf(workshopId) || isAdmin();
+      }
+    }
+
+    // Profile Systems & Calculation Rules
+    match /profileSystems/{systemId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /calculationRules/{ruleId} {
+      allow read: if isSignedIn();
+      // Rules are versioned; only admin can create draft/approved rules
+      allow write: if isAdmin();
+    }
+
+    // Catalog items & Glass types
+    match /catalogItems/{itemId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /glassTypes/{glassId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // Suppliers & Supplier subcollections
+    match /suppliers/{supplierId} {
+      allow read: if isSignedIn();
+      allow write: if isSupplier(supplierId) || isAdmin();
+
+      match /prices/{priceId} {
+        allow read: if isSignedIn();
+        allow write: if isSupplier(supplierId) || isAdmin();
+      }
+
+      // Stock and lots are server-only writes (via Cloud Functions transactions)
+      match /stock/{itemId} {
+        allow read: if isSupplier(supplierId) || isAdmin();
+        allow write: if false;
+      }
+
+      match /lots/{lotId} {
+        allow read: if isSupplier(supplierId) || isAdmin();
+        allow write: if false;
+      }
+    }
+
+    // Orders
+    match /orders/{orderId} {
+      allow read: if isSignedIn() && (
+        isOwnerOf(resource.data.workshopId) ||
+        isSupplier(resource.data.supplierId) ||
+        isAdmin()
+      );
+      // Status confirmation and inventory deductions are server-only
+      allow create: if isSignedIn() && isOwnerOf(request.resource.data.workshopId);
+      allow update: if isSignedIn() && (
+        isAdmin() ||
+        (isSupplier(resource.data.supplierId) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt']))
+      );
+      allow delete: if isAdmin();
+    }
+
+    // Inventory Movements & Audit Logs are strictly server-side
+    match /inventoryMovements/{movementId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /auditLogs/{logId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+  }
+}
