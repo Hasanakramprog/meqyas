@@ -51,14 +51,25 @@ class AppUser {
       email: map['email'] as String? ?? '',
       fullName: map['fullName'] as String? ?? '',
       phone: map['phone'] as String? ?? '',
-      phoneVerifiedAt: map['phoneVerifiedAt'] != null
-          ? DateTime.tryParse(map['phoneVerifiedAt'] as String)
-          : null,
+      phoneVerifiedAt: _parseDateTime(map['phoneVerifiedAt']),
       isEmailVerified: isEmailVerified || (map['isEmailVerified'] as bool? ?? false),
       role: UserRole.fromCode(map['role'] as String?),
       status: UserStatus.fromCode(map['status'] as String?),
       workshopId: map['workshopId'] as String?,
       supplierId: map['supplierId'] as String?,
     );
+  }
+
+  static DateTime? _parseDateTime(dynamic value) {
+    if (value == null) return null;
+    if (value is DateTime) return value;
+    if (value is String) return DateTime.tryParse(value);
+    if (value is int) return DateTime.fromMillisecondsSinceEpoch(value);
+    try {
+      final dynamic dyn = value;
+      final result = dyn.toDate();
+      if (result is DateTime) return result;
+    } catch (_) {}
+    return null;
   }
 }
