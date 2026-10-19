@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -27,55 +28,71 @@ class FirebaseAuthRepository implements AuthRepository {
   }
 
   void _initAuthListener() {
-    _authSubscription = _auth.authStateChanges().listen((firebaseUser) async {
-      _userDocSubscription?.cancel();
+    try {
+      _authSubscription = _auth.authStateChanges().listen((firebaseUser) async {
+        try {
+          _userDocSubscription?.cancel();
 
-      if (firebaseUser == null) {
-        _currentUser = null;
-        _authStateController.add(null);
-        return;
-      }
-
-      // Force token refresh to read latest custom claims
-      final tokenResult = await firebaseUser.getIdTokenResult(true);
-      final roleStr = tokenResult.claims?['role'] as String?;
-      final workshopId = tokenResult.claims?['workshopId'] as String?;
-      final supplierId = tokenResult.claims?['supplierId'] as String?;
-
-      // Listen to users/{uid} document in Firestore
-      _userDocSubscription = _firestore
-          .collection('users')
-          .doc(firebaseUser.uid)
-          .snapshots()
-          .listen(
-        (doc) {
-          if (doc.exists && doc.data() != null) {
-            final data = doc.data()!;
-            _currentUser = AppUser.fromMap(
-              data,
-              firebaseUser.uid,
-              isEmailVerified: firebaseUser.emailVerified,
-            );
-          } else {
-            // Fallback while bootstrap function completes
-            _currentUser = AppUser(
-              uid: firebaseUser.uid,
-              email: firebaseUser.email ?? '',
-              fullName: firebaseUser.displayName ?? '',
-              phone: '',
-              isEmailVerified: firebaseUser.emailVerified,
-              role: UserRole.fromCode(roleStr),
-              workshopId: workshopId,
-              supplierId: supplierId,
-            );
+          if (firebaseUser == null) {
+            _currentUser = null;
+            _authStateController.add(null);
+            return;
           }
+
+          String? roleStr;
+          String? workshopId;
+          String? supplierId;
+
+          try {
+            final tokenResult = await firebaseUser.getIdTokenResult(true);
+            roleStr = tokenResult.claims?['role'] as String?;
+            workshopId = tokenResult.claims?['workshopId'] as String?;
+            supplierId = tokenResult.claims?['supplierId'] as String?;
+          } catch (e) {
+            debugPrint('Failed to refresh ID token claims: $e');
+          }
+
+          // Initial fallback user before Firestore doc arrives
+          _currentUser = AppUser(
+            uid: firebaseUser.uid,
+            email: firebaseUser.email ?? '',
+            fullName: firebaseUser.displayName ?? '',
+            phone: '',
+            isEmailVerified: firebaseUser.emailVerified,
+            role: UserRole.fromCode(roleStr),
+            workshopId: workshopId,
+            supplierId: supplierId,
+          );
           _authStateController.add(_currentUser);
-        },
-        onError: (error) {
-          _authStateController.add(_currentUser);
-        },
-      );
-    });
+
+          // Listen to users/{uid} document in Firestore
+          _userDocSubscription = _firestore
+              .collection('users')
+              .doc(firebaseUser.uid)
+              .snapshots()
+              .listen(
+            (doc) {
+              if (doc.exists && doc.data() != null) {
+                final data = doc.data()!;
+                _currentUser = AppUser.fromMap(
+                  data,
+                  firebaseUser.uid,
+                  isEmailVerified: firebaseUser.emailVerified,
+                );
+              }
+              _authStateController.add(_currentUser);
+            },
+            onError: (error) {
+              debugPrint('Firestore user doc listen error: $error');
+            },
+          );
+        } catch (e) {
+          debugPrint('Auth listener processing error: $e');
+        }
+      });
+    } catch (e) {
+      debugPrint('Auth listener initialization error: $e');
+    }
   }
 
   @override
