@@ -9,8 +9,8 @@ class FirebaseConfig {
   static FirebaseOptions get currentPlatformOptions {
     if (kIsWeb) {
       return const FirebaseOptions(
-        apiKey: 'AIzaSyDemo-MeqyasFakeApiKeyForEmulator123',
-        appId: '1:100000000000:web:meqyas-demo-app-id',
+        apiKey: 'AIzaSyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p67',
+        appId: '1:100000000000:web:a1b2c3d4e5f60718',
         messagingSenderId: '100000000000',
         projectId: 'demo-meqyas',
         storageBucket: 'demo-meqyas.appspot.com',
@@ -19,7 +19,7 @@ class FirebaseConfig {
     if (defaultTargetPlatform == TargetPlatform.iOS ||
         defaultTargetPlatform == TargetPlatform.macOS) {
       return const FirebaseOptions(
-        apiKey: 'AIzaSyDemo-MeqyasFakeApiKeyForEmulator123',
+        apiKey: 'AIzaSyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p67',
         appId: '1:100000000000:ios:a1b2c3d4e5f60718',
         messagingSenderId: '100000000000',
         projectId: 'demo-meqyas',
@@ -28,8 +28,8 @@ class FirebaseConfig {
       );
     }
     return const FirebaseOptions(
-      apiKey: 'AIzaSyDemo-MeqyasFakeApiKeyForEmulator123',
-      appId: '1:100000000000:android:meqyas-demo-app-id',
+      apiKey: 'AIzaSyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p67',
+      appId: '1:100000000000:android:a1b2c3d4e5f60718',
       messagingSenderId: '100000000000',
       projectId: 'demo-meqyas',
       storageBucket: 'demo-meqyas.appspot.com',
