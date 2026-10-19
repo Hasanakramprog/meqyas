@@ -1,8 +1,9 @@
 import * as admin from "firebase-admin";
+import { FieldValue, getFirestore } from "firebase-admin/firestore";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 
 admin.initializeApp();
-const db = admin.firestore();
+const db = getFirestore();
 
 /**
  * Bootstraps an owner account:
@@ -27,7 +28,7 @@ export const bootstrapOwner = onCall(async (request) => {
   const workshopRef = db.collection("workshops").doc();
   const workshopId = workshopRef.id;
 
-  const now = admin.firestore.FieldValue.serverTimestamp();
+  const now = FieldValue.serverTimestamp();
 
   const batch = db.batch();
 
@@ -89,7 +90,7 @@ export const createSupplierUser = onCall(async (request) => {
 
   const supplierRef = db.collection("suppliers").doc();
   const supplierId = supplierRef.id;
-  const now = admin.firestore.FieldValue.serverTimestamp();
+  const now = FieldValue.serverTimestamp();
 
   await supplierRef.set({
     name,
