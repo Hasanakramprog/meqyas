@@ -45,8 +45,14 @@ app.*.map.json
 /android/app/release
 
 # Node / Cloud Functions
+node_modules/
+node_modules
 functions/node_modules/
 functions/lib/
+
+# Swift Package Manager
+**/.build/
+**/xcshareddata/swiftpm/
 
 # Widget Preview related
 .widget_preview/

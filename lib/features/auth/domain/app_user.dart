@@ -6,6 +6,7 @@ class AppUser {
   final String fullName;
   final String phone;
   final DateTime? phoneVerifiedAt;
+  final bool isEmailVerified;
   final UserRole role;
   final UserStatus status;
   final String? workshopId;
@@ -17,6 +18,7 @@ class AppUser {
     required this.fullName,
     required this.phone,
     this.phoneVerifiedAt,
+    this.isEmailVerified = false,
     required this.role,
     this.status = UserStatus.active,
     this.workshopId,
@@ -35,6 +37,7 @@ class AppUser {
       'fullName': fullName,
       'phone': phone,
       'phoneVerifiedAt': phoneVerifiedAt?.toIso8601String(),
+      'isEmailVerified': isEmailVerified,
       'role': role.code,
       'status': status.code,
       'workshopId': workshopId,
@@ -42,7 +45,7 @@ class AppUser {
     };
   }
 
-  factory AppUser.fromMap(Map<String, dynamic> map, String uid) {
+  factory AppUser.fromMap(Map<String, dynamic> map, String uid, {bool isEmailVerified = false}) {
     return AppUser(
       uid: uid,
       email: map['email'] as String? ?? '',
@@ -51,6 +54,7 @@ class AppUser {
       phoneVerifiedAt: map['phoneVerifiedAt'] != null
           ? DateTime.tryParse(map['phoneVerifiedAt'] as String)
           : null,
+      isEmailVerified: isEmailVerified || (map['isEmailVerified'] as bool? ?? false),
       role: UserRole.fromCode(map['role'] as String?),
       status: UserStatus.fromCode(map['status'] as String?),
       workshopId: map['workshopId'] as String?,

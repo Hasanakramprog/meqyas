@@ -1,15 +1,18 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../app/theme/app_colors.dart';
+import '../domain/auth_repository.dart';
+import 'controllers/auth_controller.dart';
 
-class RegisterScreen extends StatefulWidget {
+class RegisterScreen extends ConsumerStatefulWidget {
   const RegisterScreen({super.key});
 
   @override
-  State<RegisterScreen> createState() => _RegisterScreenState();
+  ConsumerState<RegisterScreen> createState() => _RegisterScreenState();
 }
 
-class _RegisterScreenState extends State<RegisterScreen> {
+class _RegisterScreenState extends ConsumerState<RegisterScreen> {
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
   final _emailController = TextEditingController();
@@ -34,6 +37,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    final actionState = ref.watch(authActionControllerProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -66,7 +70,35 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           color: isDark ? AppColors.slate400 : AppColors.slate600,
                         ),
                       ),
-                      const SizedBox(height: 24),
+                      const SizedBox(height: 20),
+
+                      // Error banner if any
+                      if (actionState.errorMessage != null) ...[
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: AppColors.error.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: AppColors.error.withValues(alpha: 0.4)),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.error_outline_rounded, color: AppColors.error, size: 20),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  actionState.errorMessage!,
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: AppColors.error,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                      ],
 
                       // Full name
                       TextFormField(
@@ -157,17 +189,38 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         validator: (value) =>
                             value == null || value.length < 6 ? 'كلمة المرور يجب ألا تقل عن 6 خانات' : null,
                       ),
-                      const SizedBox(height: 28),
+                      const SizedBox(height: 24),
 
                       // Submit
                       ElevatedButton(
-                        onPressed: () {
-                          if (_formKey.currentState!.validate()) {
-                            // Phase 1: bootstrapOwner call
-                            context.go('/dashboard/owner');
-                          }
-                        },
-                        child: const Text('تسجيل وإنشاء الورشة'),
+                        onPressed: actionState.isLoading
+                            ? null
+                            : () async {
+                                if (_formKey.currentState!.validate()) {
+                                  final data = SignUpData(
+                                    fullName: _nameController.text,
+                                    email: _emailController.text,
+                                    password: _passwordController.text,
+                                    phone: _phoneController.text,
+                                    workshopName: _workshopNameController.text,
+                                    workshopLocation: _locationController.text,
+                                  );
+
+                                  await ref
+                                      .read(authActionControllerProvider.notifier)
+                                      .signUp(data);
+                                }
+                              },
+                        child: actionState.isLoading
+                            ? const SizedBox(
+                                height: 20,
+                                width: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : const Text('تسجيل وإنشاء الورشة'),
                       ),
                       const SizedBox(height: 16),
 
