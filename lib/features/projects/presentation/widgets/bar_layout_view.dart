@@ -117,7 +117,7 @@ class BarLayoutView extends StatelessWidget {
     required bool isDark,
   }) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
       decoration: BoxDecoration(
         color: isDark ? AppColors.darkSurface : AppColors.lightBackground,
         borderRadius: BorderRadius.circular(8),
@@ -128,6 +128,8 @@ class BarLayoutView extends StatelessWidget {
         children: [
           Text(
             title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
               fontSize: 10,
               color: isDark ? AppColors.slate400 : AppColors.slate600,
@@ -136,6 +138,8 @@ class BarLayoutView extends StatelessWidget {
           const SizedBox(height: 4),
           Text(
             value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: Theme.of(context).textTheme.titleSmall?.copyWith(
               fontWeight: FontWeight.w800,
               color: color,
@@ -151,43 +155,50 @@ class BarLayoutView extends StatelessWidget {
 
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(14),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             // Bar Header
             Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: AppColors.amberPrimary.withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Text(
-                        'قضيب رقم #${bar.barNumber}',
-                        style: const TextStyle(
-                          color: AppColors.amberLight,
-                          fontWeight: FontWeight.w800,
-                          fontSize: 12,
-                        ),
-                      ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: AppColors.amberPrimary.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    'قضيب #${bar.barNumber}',
+                    style: const TextStyle(
+                      color: AppColors.amberLight,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 12,
                     ),
-                    const SizedBox(width: 8),
-                    Text(
-                      'قطاع: ${bar.itemCode}',
-                      style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
-                    ),
-                  ],
+                  ),
                 ),
-                Text(
-                  'المتبقي: ${bar.remainingLengthCm.toStringAsFixed(1)} سم ${bar.isRemnantUseful ? "(فضلة صالحة)" : "(سكراب)"}',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: bar.isRemnantUseful ? AppColors.success : AppColors.slate400,
-                    fontWeight: FontWeight.w700,
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'قطاع: ${_arabicProfileName(bar.itemCode)}',
+                    style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: (bar.isRemnantUseful ? AppColors.success : AppColors.slate600).withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    'المتبقي: ${bar.remainingLengthCm.toStringAsFixed(1)} سم (${bar.isRemnantUseful ? "فضلة" : "هدر"})',
+                    style: TextStyle(
+                      color: bar.isRemnantUseful ? AppColors.success : AppColors.slate400,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 11,
+                    ),
                   ),
                 ),
               ],
@@ -257,4 +268,22 @@ class BarLayoutView extends StatelessWidget {
       ),
     );
   }
+
+  String _arabicProfileName(String code) {
+    switch (code) {
+      case 'track':
+        return 'سكة 2000';
+      case 'u_profile':
+        return 'يو 2000';
+      case 'kaab':
+        return 'كعب 2000';
+      case 'screen_vertical':
+        return 'منخل عامودي';
+      case 'screen_horizontal':
+        return 'منخل أفقي';
+      default:
+        return code;
+    }
+  }
 }
+
