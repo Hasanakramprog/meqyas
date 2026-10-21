@@ -56,3 +56,7 @@ functions/lib/
 
 # Widget Preview related
 .widget_preview/
+
+# Firebase Emulator Local Data
+emulator_data/
+
