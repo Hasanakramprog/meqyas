@@ -1,11 +1,16 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:maqyas_engine/maqyas_engine.dart';
+import 'package:printing/printing.dart';
 import '../../../../app/theme/app_colors.dart';
 import '../../../auth/presentation/controllers/auth_controller.dart';
 import '../../../projects/domain/models/project_unit.dart';
 import '../../../projects/presentation/screens/project_detail_screen.dart';
+import '../../../reports/data/label_generator.dart';
+import '../../../reports/data/pdf_generator.dart';
 import '../../../rules/data/rules_repository.dart';
 import '../../data/cut_plan_repository.dart';
 import '../widgets/cut_summary_card.dart';
@@ -28,6 +33,8 @@ class CutPlanScreen extends ConsumerStatefulWidget {
 
 class _CutPlanScreenState extends ConsumerState<CutPlanScreen> {
   bool _isSaving = false;
+  bool _isExportingPdf = false;
+  bool _isExportingLabels = false;
   OptimizationResult? _result;
 
   @override
@@ -55,6 +62,26 @@ class _CutPlanScreenState extends ConsumerState<CutPlanScreen> {
           backgroundColor: isDark ? AppColors.darkSurface : AppColors.lightSurface,
           elevation: 0,
           actions: [
+            IconButton(
+              icon: _isExportingPdf
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.amberPrimary))
+                  : const Icon(Icons.picture_as_pdf_rounded, color: AppColors.amberPrimary),
+              tooltip: 'تصدير جدول القص PDF',
+              onPressed: (_result == null || _isExportingPdf) ? null : _exportPdf,
+            ),
+            IconButton(
+              icon: _isExportingLabels
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.warning))
+                  : const Icon(Icons.qr_code_2_rounded, color: AppColors.warning),
+              tooltip: 'طباعة ملصقات QR للقطع',
+              onPressed: (_result == null || _isExportingLabels) ? null : _exportLabels,
+            ),
             IconButton(
               icon: const Icon(Icons.layers_rounded),
               tooltip: 'مخزن الفضلات',
@@ -192,7 +219,7 @@ class _CutPlanScreenState extends ConsumerState<CutPlanScreen> {
         child: Row(
           children: [
             Expanded(
-              flex: 2,
+              flex: 3,
               child: ElevatedButton.icon(
                 icon: _isSaving
                     ? const SizedBox(
@@ -211,23 +238,100 @@ class _CutPlanScreenState extends ConsumerState<CutPlanScreen> {
               ),
             ),
             const SizedBox(width: 8),
-            Expanded(
-              child: OutlinedButton.icon(
-                icon: const Icon(Icons.layers_rounded, size: 16),
-                label: const Text('الفضلات'),
-                style: OutlinedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                ),
-                onPressed: () => context.push(
-                  '/dashboard/owner/remnants?workshopId=${widget.workshopId}',
-                ),
-              ),
+            IconButton.filledTonal(
+              tooltip: 'تصدير PDF',
+              icon: _isExportingPdf
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.picture_as_pdf_rounded),
+              onPressed: (_result == null || _isExportingPdf) ? null : _exportPdf,
+            ),
+            const SizedBox(width: 4),
+            IconButton.filledTonal(
+              tooltip: 'ملصقات QR',
+              icon: _isExportingLabels
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.qr_code_2_rounded),
+              onPressed: (_result == null || _isExportingLabels) ? null : _exportLabels,
             ),
           ],
         ),
       ),
     );
+  }
+
+  Future<String> _resolveWorkshopName() async {
+    final currentUser = ref.read(currentUserProvider).value;
+    final ownerUid = currentUser?.uid ?? '';
+    final workshops = ref.read(ownerWorkshopsProvider(ownerUid)).value ?? [];
+    for (final w in workshops) {
+      if (w.id == widget.workshopId) return w.name;
+    }
+    return workshops.isNotEmpty ? workshops.first.name : 'ورشة مقياس للألمنيوم';
+  }
+
+  Future<void> _exportPdf() async {
+    if (_result == null) return;
+    final query = (workshopId: widget.workshopId, projectId: widget.projectId);
+    final project = ref.read(projectDetailProvider(query)).value;
+    final projectName = project?.name ?? 'المشروع';
+    final workshopName = await _resolveWorkshopName();
+
+    setState(() => _isExportingPdf = true);
+    try {
+      final pdfBytes = await CutPlanPdfGenerator.generate(
+        workshopName: workshopName,
+        projectName: projectName,
+        result: _result!,
+      );
+
+      await Printing.layoutPdf(
+        name: 'خطة_قص_${projectName.replaceAll(" ", "_")}.pdf',
+        onLayout: (format) async => pdfBytes,
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('خطأ أثناء تجهيز ملف PDF: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isExportingPdf = false);
+    }
+  }
+
+  Future<void> _exportLabels() async {
+    if (_result == null) return;
+    final query = (workshopId: widget.workshopId, projectId: widget.projectId);
+    final project = ref.read(projectDetailProvider(query)).value;
+    final projectName = project?.name ?? 'المشروع';
+
+    setState(() => _isExportingLabels = true);
+    try {
+      final pdfBytes = await QrLabelPdfGenerator.generate(
+        projectName: projectName,
+        projectId: widget.projectId,
+        result: _result!,
+      );
+
+      await Printing.layoutPdf(
+        name: 'ملصقات_${projectName.replaceAll(" ", "_")}.pdf',
+        onLayout: (format) async => pdfBytes,
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('خطأ أثناء تجهيز ملصقات QR: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isExportingLabels = false);
+    }
   }
 
   Future<void> _savePlan() async {
@@ -266,6 +370,32 @@ class _CutPlanScreenState extends ConsumerState<CutPlanScreen> {
         // Invalidate remnants so stock screen refreshes
         ref.invalidate(availableRemnantsProvider(widget.workshopId));
         debugPrint('Cut plan saved: $planId');
+
+        // Optional background upload of PDF to Firebase Storage
+        try {
+          final workshopName = await _resolveWorkshopName();
+          final pdfBytes = await CutPlanPdfGenerator.generate(
+            workshopName: workshopName,
+            projectName: project.name,
+            result: _result!,
+          );
+          final storageRef = FirebaseStorage.instance
+              .ref('workshops/${widget.workshopId}/cut-plans/$planId/cut_plan.pdf');
+          await storageRef.putData(
+            pdfBytes,
+            SettableMetadata(contentType: 'application/pdf'),
+          );
+          final url = await storageRef.getDownloadURL();
+          await FirebaseFirestore.instance
+              .collection('workshops')
+              .doc(widget.workshopId)
+              .collection('cutPlans')
+              .doc(planId)
+              .update({'pdfUrl': url});
+          debugPrint('Cut plan PDF uploaded: $url');
+        } catch (err) {
+          debugPrint('PDF storage upload skipped: $err');
+        }
       }
     } catch (e) {
       if (mounted) {
