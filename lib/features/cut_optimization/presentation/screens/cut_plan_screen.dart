@@ -73,7 +73,10 @@ class _CutPlanScreenState extends ConsumerState<CutPlanScreen> {
             }
 
             final optimizer = optimizerAsync.value ?? const CutOptimizer();
-            final availableRemnants = availableRemnantsAsync.value ?? [];
+            // A project can only consume remnants from OTHER projects / shelf stock, never its own
+            final availableRemnants = (availableRemnantsAsync.value ?? [])
+                .where((r) => r.sourceProjectId != widget.projectId)
+                .toList();
 
             // Build cut pieces from all units
             final allPieces = _buildPieces(units, ref);
@@ -161,10 +164,13 @@ class _CutPlanScreenState extends ConsumerState<CutPlanScreen> {
     List<CutPiece> pieces,
     List<RemnantDoc> remnants,
   ) {
+    final externalRemnants = remnants
+        .where((r) => r.sourceProjectId != widget.projectId)
+        .toList();
     setState(() {
       _result = optimizer.optimize(
         pieces: pieces,
-        availableRemnants: remnants.map((r) => r.toRemnantStock()).toList(),
+        availableRemnants: externalRemnants.map((r) => r.toRemnantStock()).toList(),
       );
     });
   }
@@ -259,7 +265,6 @@ class _CutPlanScreenState extends ConsumerState<CutPlanScreen> {
         );
         // Invalidate remnants so stock screen refreshes
         ref.invalidate(availableRemnantsProvider(widget.workshopId));
-        setState(() => _result = null); // will recalculate with updated stock
         debugPrint('Cut plan saved: $planId');
       }
     } catch (e) {
