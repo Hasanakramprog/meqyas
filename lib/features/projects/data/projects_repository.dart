@@ -90,13 +90,60 @@ class FirestoreProjectsRepository implements ProjectsRepository {
 
   @override
   Future<void> deleteProject(String workshopId, String projectId) async {
-    // Delete subcollection units first
-    final units = await _unitsCol(workshopId, projectId).get();
     final batch = _firestore.batch();
+
+    // 1. Delete subcollection units
+    final units = await _unitsCol(workshopId, projectId).get();
     for (final u in units.docs) {
       batch.delete(u.reference);
     }
+
+    // 2. Delete cut plans for this project
+    final plans = await _firestore
+        .collection('workshops')
+        .doc(workshopId)
+        .collection('cutPlans')
+        .where('projectId', isEqualTo: projectId)
+        .get();
+
+    final planIds = plans.docs.map((d) => d.id).toList();
+    for (final p in plans.docs) {
+      batch.delete(p.reference);
+    }
+
+    // 3. Delete remnants originating from this project
+    final remnants = await _firestore
+        .collection('workshops')
+        .doc(workshopId)
+        .collection('remnants')
+        .where('sourceProjectId', isEqualTo: projectId)
+        .get();
+
+    for (final r in remnants.docs) {
+      batch.delete(r.reference);
+    }
+
+    // 4. Restore shelf remnants that were consumed by this project's plans
+    if (planIds.isNotEmpty) {
+      final consumedRemnants = await _firestore
+          .collection('workshops')
+          .doc(workshopId)
+          .collection('remnants')
+          .where('usedInPlanId', whereIn: planIds.take(10).toList())
+          .get();
+
+      for (final rDoc in consumedRemnants.docs) {
+        batch.update(rDoc.reference, {
+          'state': 'available',
+          'usedAt': FieldValue.delete(),
+          'usedInPlanId': FieldValue.delete(),
+        });
+      }
+    }
+
+    // 5. Delete the project document
     batch.delete(_projectsCol(workshopId).doc(projectId));
+
     await batch.commit();
   }
 

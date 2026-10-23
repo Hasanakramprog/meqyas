@@ -98,7 +98,37 @@ class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> with 
               context.push('/dashboard/owner/projects/${widget.projectId}/units/new?workshopId=$workshopId');
             },
           ),
-          const SizedBox(width: 8),
+          IconButton(
+            tooltip: 'خطة القص من المخزن',
+            icon: const Icon(Icons.cut_rounded, color: AppColors.warning),
+            onPressed: () {
+              context.push(
+                '/dashboard/owner/cut-plan?projectId=${widget.projectId}&workshopId=$workshopId',
+              );
+            },
+          ),
+          PopupMenuButton<String>(
+            tooltip: 'خيارات المشروع',
+            icon: const Icon(Icons.more_vert_rounded),
+            onSelected: (val) {
+              if (val == 'delete') {
+                _confirmDeleteProject(context, ref, workshopId, projectAsync.value?.name ?? '');
+              }
+            },
+            itemBuilder: (_) => [
+              const PopupMenuItem(
+                value: 'delete',
+                child: Row(
+                  children: [
+                    Icon(Icons.delete_outline_rounded, color: AppColors.error, size: 20),
+                    SizedBox(width: 8),
+                    Text('حذف المشروع', style: TextStyle(color: AppColors.error)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(width: 4),
         ],
         bottom: TabBar(
           controller: _tabController,
@@ -405,4 +435,61 @@ class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> with 
       child: BarLayoutView(pieces: allPieces, optimizer: optimizer),
     );
   }
+
+  Future<void> _confirmDeleteProject(
+    BuildContext context,
+    WidgetRef ref,
+    String workshopId,
+    String projectName,
+  ) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.delete_forever_rounded, color: AppColors.error),
+            SizedBox(width: 8),
+            Text('حذف المشروع'),
+          ],
+        ),
+        content: Text(
+          'هل أنت متأكد من حذف مشروع «$projectName»؟\n\n'
+          'سيتم حذف جميع وحداته القياسية وخطة القص والفضلات المرتبطة به.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('إلغاء'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.error),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('حذف نهائي', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && context.mounted) {
+      try {
+        await ref.read(projectsRepositoryProvider).deleteProject(workshopId, widget.projectId);
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('تم حذف المشروع وخطة القص والفضلات بنجاح'),
+              backgroundColor: AppColors.success,
+            ),
+          );
+          context.pop();
+        }
+      } catch (e) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('خطأ أثناء حذف المشروع: $e')),
+          );
+        }
+      }
+    }
+  }
 }
+
