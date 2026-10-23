@@ -18,6 +18,8 @@ import '../../features/projects/presentation/screens/projects_list_screen.dart';
 import '../../features/projects/presentation/screens/unit_editor_screen.dart';
 import '../../features/rules/presentation/admin_rules_screen.dart';
 import '../../features/rules/presentation/workshop_rules_screen.dart';
+import '../../features/cut_optimization/presentation/screens/cut_plan_screen.dart';
+import '../../features/cut_optimization/presentation/screens/remnants_screen.dart';
 
 class RouterNotifier extends ChangeNotifier {
   final Ref _ref;
@@ -196,6 +198,26 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                 ],
               ),
             ],
+          ),
+          GoRoute(
+            path: 'cut-plan',
+            name: 'cut_plan',
+            builder: (context, state) {
+              final projectId = state.uri.queryParameters['projectId']!;
+              final workshopId = state.uri.queryParameters['workshopId'] ?? '';
+              return CutPlanScreen(
+                workshopId: workshopId,
+                projectId: projectId,
+              );
+            },
+          ),
+          GoRoute(
+            path: 'remnants',
+            name: 'workshop_remnants',
+            builder: (context, state) {
+              final workshopId = state.uri.queryParameters['workshopId'] ?? '';
+              return RemnantsScreen(workshopId: workshopId);
+            },
           ),
         ],
       ),

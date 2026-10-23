@@ -98,6 +98,15 @@ class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> with 
               context.push('/dashboard/owner/projects/${widget.projectId}/units/new?workshopId=$workshopId');
             },
           ),
+          IconButton(
+            tooltip: 'خطة القص من المخزن',
+            icon: const Icon(Icons.cut_rounded, color: AppColors.warning),
+            onPressed: () {
+              context.push(
+                '/dashboard/owner/cut-plan?projectId=${widget.projectId}&workshopId=$workshopId',
+              );
+            },
+          ),
           const SizedBox(width: 8),
         ],
         bottom: TabBar(
