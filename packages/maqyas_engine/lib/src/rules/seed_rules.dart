@@ -20,6 +20,11 @@ class SeedRules {
         quantityFormula: '2',
         lengthFormula: 'W - 3',
         dependsOn: const [],
+        nameArabic: 'سكة 2000 بحاجب',
+        outputKind: 'profile',
+        profileType: 'track',
+        cutAngleLeft: 90.0,
+        cutAngleRight: 90.0,
       ),
 
       // 2. U-Profile: يو 2000
@@ -35,6 +40,11 @@ class SeedRules {
         quantityFormula: '2',
         lengthFormula: 'H - 3.3',
         dependsOn: const [],
+        nameArabic: 'يو 2000',
+        outputKind: 'profile',
+        profileType: 'jamb',
+        cutAngleLeft: 90.0,
+        cutAngleRight: 90.0,
       ),
 
       // 3. Kaab (bottom & top sash horizontals): كعب 2000 مفرد
@@ -50,6 +60,11 @@ class SeedRules {
         quantityFormula: '2 * sashCount',
         lengthFormula: '(W - 2.5) / 2',
         dependsOn: const [],
+        nameArabic: 'كعب 2000 مفرد',
+        outputKind: 'profile',
+        profileType: 'sash',
+        cutAngleLeft: 45.0,
+        cutAngleRight: 45.0,
       ),
 
       // 4. Screen Vertical: درفة منخل عامودي
@@ -65,6 +80,11 @@ class SeedRules {
         quantityFormula: '2 * screenCount',
         lengthFormula: 'H - 4.1',
         dependsOn: const [],
+        nameArabic: 'درفة منخل عامودي',
+        outputKind: 'profile',
+        profileType: 'screen',
+        cutAngleLeft: 45.0,
+        cutAngleRight: 45.0,
       ),
 
       // 5. Screen Horizontal: درفة منخل أفقي (depends on kaab_len)
@@ -80,6 +100,11 @@ class SeedRules {
         quantityFormula: '2 * screenCount',
         lengthFormula: 'kaab_len + 2',
         dependsOn: const ['kaab_len'],
+        nameArabic: 'درفة منخل أفقي',
+        outputKind: 'profile',
+        profileType: 'screen',
+        cutAngleLeft: 45.0,
+        cutAngleRight: 45.0,
       ),
 
       // 6. Glass Height
@@ -95,6 +120,9 @@ class SeedRules {
         quantityFormula: 'sashCount',
         lengthFormula: 'H - 14',
         dependsOn: const [],
+        nameArabic: 'ارتفاع الزجاج',
+        outputKind: 'glass_height',
+        profileType: 'other',
       ),
 
       // 7. Glass Width per Sash
@@ -110,6 +138,9 @@ class SeedRules {
         quantityFormula: 'sashCount',
         lengthFormula: '(W - 16.2) / 2',
         dependsOn: const [],
+        nameArabic: 'عرض الزجاج للدرفة',
+        outputKind: 'glass_width',
+        profileType: 'other',
       ),
     ];
   }

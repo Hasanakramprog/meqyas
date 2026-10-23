@@ -21,18 +21,21 @@ class CalculatorEngine {
     final ruleVersionIdsUsed = <String>[];
     final pieces = <CutPiece>[];
 
-    // Profile item codes to resolve for System 2000
-    final targetItems = [
-      'track',
-      'u_profile',
-      'kaab',
-      if (spec.hasScreen && spec.screenCount > 0) ...[
-        'screen_vertical',
-        'screen_horizontal',
-      ],
-      'glass_height',
-      'glass_width',
-    ];
+    // Distinct item codes dynamically loaded from the active rules for this system
+    final availableItems = selector.getAvailableItemCodes(profileSystemId: spec.profileSystemId);
+    final targetItems = availableItems.isNotEmpty
+        ? availableItems
+        : [
+            'track',
+            'u_profile',
+            'kaab',
+            if (spec.hasScreen && spec.screenCount > 0) ...[
+              'screen_vertical',
+              'screen_horizontal',
+            ],
+            'glass_height',
+            'glass_width',
+          ];
 
     // 1. Select rules for each target item
     final selectedRules = <String, CalculationRule>{};
@@ -136,16 +139,22 @@ class CalculatorEngine {
         env['${itemCode}_length'] = lengthVal;
         env['${itemCode}_qty'] = qtyVal;
 
-        if (itemCode != 'glass_height' && itemCode != 'glass_width') {
+        if (rule.outputKind == 'glass_height' ||
+            rule.outputKind == 'glass_width' ||
+            rule.outputKind == 'intermediate' ||
+            itemCode == 'glass_height' ||
+            itemCode == 'glass_width') {
+          // Glass dimension or intermediate variable, skip adding to cut pieces
+        } else {
           pieces.add(
             CutPiece(
               itemCode: itemCode,
-              nameArabic: _arabicNameForItem(itemCode),
+              nameArabic: rule.nameArabic.isNotEmpty ? rule.nameArabic : _arabicNameForItem(itemCode),
               lengthCm: lengthVal,
               quantity: qtyVal,
-              cutAngleLeft: (itemCode == 'kaab' || itemCode.startsWith('screen_')) ? 45.0 : 90.0,
-              cutAngleRight: (itemCode == 'kaab' || itemCode.startsWith('screen_')) ? 45.0 : 90.0,
-              profileType: _profileTypeForItem(itemCode),
+              cutAngleLeft: rule.cutAngleLeft,
+              cutAngleRight: rule.cutAngleRight,
+              profileType: rule.profileType.isNotEmpty ? rule.profileType : _profileTypeForItem(itemCode),
               ruleVersionId: '${rule.id}_v${rule.version}',
             ),
           );

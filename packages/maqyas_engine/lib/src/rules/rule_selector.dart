@@ -18,6 +18,20 @@ class RuleSelector {
 
   const RuleSelector(this.allRules);
 
+  /// Returns all distinct item codes with approved rules for the given profile system
+  List<String> getAvailableItemCodes({required String profileSystemId}) {
+    final seen = <String>{};
+    final items = <String>[];
+    for (final r in allRules) {
+      if (r.profileSystemId == profileSystemId && r.isApproved) {
+        if (seen.add(r.itemCode)) {
+          items.add(r.itemCode);
+        }
+      }
+    }
+    return items;
+  }
+
   /// Selects the authoritative rule for a specific itemCode given unit specifications
   RuleSelectionResult selectRule({
     required String itemCode,

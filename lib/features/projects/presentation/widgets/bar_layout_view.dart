@@ -4,16 +4,21 @@ import 'package:meqyas/app/theme/app_colors.dart';
 
 class BarLayoutView extends StatelessWidget {
   final List<CutPiece> pieces;
+  final CutOptimizer? optimizer;
 
-  const BarLayoutView({super.key, required this.pieces});
+  const BarLayoutView({
+    super.key,
+    required this.pieces,
+    this.optimizer,
+  });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
 
-    const optimizer = CutOptimizer();
-    final optResult = optimizer.optimize(pieces: pieces);
+    final opt = optimizer ?? const CutOptimizer();
+    final optResult = opt.optimize(pieces: pieces);
 
     if (optResult.barPlans.isEmpty) {
       return Center(
@@ -225,18 +230,21 @@ class BarLayoutView extends StatelessWidget {
                           : '${cut.lengthCm.toInt()} سم';
                       return Expanded(
                         flex: flex > 0 ? flex : 1,
-                        child: Container(
-                          margin: const EdgeInsets.symmetric(horizontal: 0.5),
-                          color: AppColors.glassBlue.withValues(alpha: isDark ? 0.7 : 0.8),
-                          alignment: Alignment.center,
-                          child: Text(
-                            label,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 9.5,
-                              fontWeight: FontWeight.w700,
+                        child: Tooltip(
+                          message: '${cut.nameArabic}: ${cut.lengthCm.toStringAsFixed(1)} سم${cut.unitTag != null && cut.unitTag!.isNotEmpty ? " [${cut.unitTag}]" : ""}',
+                          child: Container(
+                            margin: const EdgeInsets.symmetric(horizontal: 0.5),
+                            color: AppColors.glassBlue.withValues(alpha: isDark ? 0.7 : 0.8),
+                            alignment: Alignment.center,
+                            child: Text(
+                              label,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 9.5,
+                                fontWeight: FontWeight.w700,
+                              ),
+                              overflow: TextOverflow.ellipsis,
                             ),
-                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
                       );

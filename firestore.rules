@@ -24,7 +24,10 @@ service cloud.firestore {
     }
     
     function isOwnerOf(workshopId) {
-      return isActive() && role() == 'owner' && userToken().workshopId == workshopId;
+      return isActive() && role() == 'owner' && (
+        userToken().workshopId == workshopId ||
+        get(/databases/$(database)/documents/workshops/$(workshopId)).data.ownerUid == request.auth.uid
+      );
     }
     
     function isSupplier(supplierId) {
@@ -40,7 +43,7 @@ service cloud.firestore {
 
     // Workshops and their subcollections
     match /workshops/{workshopId} {
-      allow read, write: if isOwnerOf(workshopId) || isAdmin();
+      allow read, write: if (isActive() && role() == 'owner' && (userToken().workshopId == workshopId || resource.data.ownerUid == request.auth.uid)) || isAdmin();
 
       match /{subcollection=**} {
         allow read, write: if isOwnerOf(workshopId) || isAdmin();
@@ -54,8 +57,21 @@ service cloud.firestore {
     }
 
     match /calculationRules/{ruleId} {
+      // Non-admins can only read approved or archived rules (no drafts)
+      allow read: if isSignedIn() && (
+        resource.data.status in ['approved', 'archived'] || isAdmin()
+      );
+      // Admin client writes drafts; transitions to approved/archived are Cloud Function only
+      allow create: if isAdmin() && request.resource.data.status == 'draft';
+      allow update: if isAdmin() && (
+        request.resource.data.status == 'draft' || resource.data.status == 'draft'
+      );
+      allow delete: if isAdmin() && resource.data.status == 'draft';
+    }
+
+    // Platform Configuration (e.g. cutting optimizer global defaults)
+    match /systemConfigs/{configId} {
       allow read: if isSignedIn();
-      // Rules are versioned; only admin can create draft/approved rules
       allow write: if isAdmin();
     }
 

@@ -7,6 +7,8 @@ class CutOptimizer {
   final double kerfPerCutCm; // saw kerf per cut (0.5 cm)
   final double minRemnantCm; // threshold for useful remnant (50 cm)
 
+  /// TODO(Phase 4): Move these default parameters to Admin Global Configuration in Firestore,
+  /// with ability for Workshop Owners to override them per workshop settings.
   const CutOptimizer({
     this.barLengthCm = 660.0,
     this.trimLossCm = 4.0,
