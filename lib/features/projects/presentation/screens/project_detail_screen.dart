@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:maqyas_engine/maqyas_engine.dart';
 import 'package:meqyas/app/theme/app_colors.dart';
 import 'package:meqyas/features/auth/presentation/controllers/auth_controller.dart';
+import '../../../../features/rules/data/rules_repository.dart';
 import '../../data/projects_repository.dart';
 import '../../domain/models/project.dart';
 import '../../domain/models/project_unit.dart';
@@ -13,7 +14,7 @@ import 'quick_entry_sheet.dart';
 
 final projectDetailProvider = StreamProvider.autoDispose.family<Project?, ({String workshopId, String projectId})>((ref, arg) {
   final repo = ref.watch(projectsRepositoryProvider);
-  return Stream.fromFuture(repo.getProject(arg.workshopId, arg.projectId));
+  return repo.watchProject(arg.workshopId, arg.projectId);
 });
 
 final projectUnitsProvider = StreamProvider.autoDispose.family<List<ProjectUnit>, ({String workshopId, String projectId})>((ref, arg) {
@@ -23,8 +24,13 @@ final projectUnitsProvider = StreamProvider.autoDispose.family<List<ProjectUnit>
 
 class ProjectDetailScreen extends ConsumerStatefulWidget {
   final String projectId;
+  final String? initialWorkshopId;
 
-  const ProjectDetailScreen({super.key, required this.projectId});
+  const ProjectDetailScreen({
+    super.key,
+    required this.projectId,
+    this.initialWorkshopId,
+  });
 
   @override
   ConsumerState<ProjectDetailScreen> createState() => _ProjectDetailScreenState();
@@ -49,8 +55,15 @@ class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> with 
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+
     final currentUser = ref.watch(currentUserProvider).value;
-    final workshopId = currentUser?.workshopId ?? '';
+    final ownerUid = currentUser?.uid ?? '';
+    final workshops = ref.watch(ownerWorkshopsProvider(ownerUid)).value ?? [];
+    final activeId = ref.watch(activeWorkshopIdProvider);
+
+    final workshopId = widget.initialWorkshopId ??
+        activeId ??
+        (workshops.isNotEmpty ? workshops.first.id : (currentUser?.workshopId ?? ''));
 
     final query = (workshopId: workshopId, projectId: widget.projectId);
     final projectAsync = ref.watch(projectDetailProvider(query));
@@ -71,7 +84,10 @@ class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> with 
               showModalBottomSheet(
                 context: context,
                 isScrollControlled: true,
-                builder: (_) => QuickEntrySheet(projectId: widget.projectId),
+                builder: (_) => QuickEntrySheet(
+                  projectId: widget.projectId,
+                  workshopId: workshopId,
+                ),
               );
             },
           ),
@@ -79,15 +95,18 @@ class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> with 
             tooltip: 'إضافة عنصر بتصميم هندسي كامل',
             icon: const Icon(Icons.add_rounded),
             onPressed: () {
-              context.push('/dashboard/owner/projects/${widget.projectId}/units/new');
+              context.push('/dashboard/owner/projects/${widget.projectId}/units/new?workshopId=$workshopId');
             },
           ),
           const SizedBox(width: 8),
         ],
         bottom: TabBar(
           controller: _tabController,
+          isScrollable: true,
+          tabAlignment: TabAlignment.start,
           indicatorColor: AppColors.amberPrimary,
           labelColor: AppColors.amberPrimary,
+          unselectedLabelColor: isDark ? AppColors.slate400 : AppColors.slate600,
           tabs: const [
             Tab(icon: Icon(Icons.list_alt_rounded, size: 18), text: 'عناصر القياس'),
             Tab(icon: Icon(Icons.content_cut_rounded, size: 18), text: 'تقطيع المشروع الكلي'),
@@ -101,8 +120,8 @@ class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> with 
             controller: _tabController,
             children: [
               _buildUnitsListTab(context, units, workshopId, isDark),
-              _buildProjectCuttingTab(context, units),
-              _buildProjectBarsTab(context, units),
+              _buildProjectCuttingTab(context, units, workshopId),
+              _buildProjectBarsTab(context, units, workshopId),
             ],
           );
         },
@@ -147,7 +166,10 @@ class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> with 
                       showModalBottomSheet(
                         context: context,
                         isScrollControlled: true,
-                        builder: (_) => QuickEntrySheet(projectId: widget.projectId),
+                        builder: (_) => QuickEntrySheet(
+                          projectId: widget.projectId,
+                          workshopId: workshopId,
+                        ),
                       );
                     },
                   ),
@@ -156,7 +178,7 @@ class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> with 
                     icon: const Icon(Icons.architecture_rounded, size: 18),
                     label: const Text('استوديو التصميم 2D'),
                     onPressed: () {
-                      context.push('/dashboard/owner/projects/${widget.projectId}/units/new');
+                      context.push('/dashboard/owner/projects/${widget.projectId}/units/new?workshopId=$workshopId');
                     },
                   ),
                 ],
@@ -167,82 +189,109 @@ class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> with 
       );
     }
 
-    return ListView.separated(
+    final effectiveRules = ref.watch(effectiveRulesProvider(workshopId)).value ?? [];
+    final activeRuleIds = effectiveRules.map((r) => r.id).toSet();
+    final hasOutdatedUnit = activeRuleIds.isNotEmpty &&
+        units.any((u) => u.ruleVersionIdsUsed.isNotEmpty && u.ruleVersionIdsUsed.any((id) => !activeRuleIds.contains(id)));
+
+    return ListView(
       padding: const EdgeInsets.all(16),
-      itemCount: units.length,
-      separatorBuilder: (_, _) => const SizedBox(height: 12),
-      itemBuilder: (context, index) {
-        final u = units[index];
-        return Card(
-          child: ListTile(
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            leading: Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: AppColors.glassBlue.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: const Icon(Icons.window_rounded, color: AppColors.glassBlueLight),
+      children: [
+        if (hasOutdatedUnit)
+          Container(
+            margin: const EdgeInsets.only(bottom: 16),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: AppColors.amberPrimary.withValues(alpha: 0.1),
+              border: Border.all(color: AppColors.amberPrimary.withValues(alpha: 0.4)),
+              borderRadius: BorderRadius.circular(10),
             ),
-            title: Text(u.name, style: const TextStyle(fontWeight: FontWeight.w700)),
-            subtitle: Text(
-              '${u.widthCm} × ${u.heightCm} سم • العدد: ${u.quantity} • ${u.glazingMode == "single" ? "مفرد" : "مزدوج"}${u.location.isNotEmpty ? " • ${u.location}" : ""}',
-              style: TextStyle(
-                color: isDark ? AppColors.slate400 : AppColors.slate600,
-                fontSize: 12,
-              ),
-            ),
-            trailing: Row(
-              mainAxisSize: MainAxisSize.min,
+            child: const Row(
               children: [
-                IconButton(
-                  tooltip: 'فتح في استوديو التصميم',
-                  icon: const Icon(Icons.tune_rounded, color: AppColors.amberPrimary),
-                  onPressed: () {
-                    context.push('/dashboard/owner/projects/${widget.projectId}/units/${u.id}', extra: u);
-                  },
-                ),
-                IconButton(
-                  tooltip: 'حذف',
-                  icon: const Icon(Icons.delete_outline_rounded, color: AppColors.error),
-                  onPressed: () async {
-                    final confirm = await showDialog<bool>(
-                      context: context,
-                      builder: (ctx) => AlertDialog(
-                        title: const Text('تأكيد الحذف'),
-                        content: Text('هل أنت متأكد من حذف "${u.name}"؟'),
-                        actions: [
-                          TextButton(onPressed: () => ctx.pop(false), child: const Text('إلغاء')),
-                          ElevatedButton(
-                            style: ElevatedButton.styleFrom(backgroundColor: AppColors.error),
-                            onPressed: () => ctx.pop(true),
-                            child: const Text('حذف'),
-                          ),
-                        ],
-                      ),
-                    );
-                    if (confirm == true) {
-                      await ref.read(projectsRepositoryProvider).deleteUnit(workshopId, widget.projectId, u.id);
-                    }
-                  },
+                Icon(Icons.info_outline_rounded, color: AppColors.amberPrimary, size: 22),
+                SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'تنبيه: تم تحديث بعض قواعد الحساب في الورشة منذ حفظ عناصر هذا المشروع. تحتفظ العناصر الحالية بنتائجها السابقة لضمان ثبات التصنيع، ويمكنك فتح أي عنصر وإعادة حفظه لتطبيق القواعد الأحدث.',
+                    style: TextStyle(fontSize: 12, height: 1.4),
+                  ),
                 ),
               ],
             ),
-            onTap: () {
-              context.push('/dashboard/owner/projects/${widget.projectId}/units/${u.id}', extra: u);
-            },
           ),
-        );
-      },
+        ...units.map((u) {
+          return Card(
+            margin: const EdgeInsets.only(bottom: 12),
+            child: ListTile(
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              leading: Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: AppColors.glassBlue.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.window_rounded, color: AppColors.glassBlueLight),
+              ),
+              title: Text(u.name, style: const TextStyle(fontWeight: FontWeight.w700)),
+              subtitle: Text(
+                '${u.widthCm} × ${u.heightCm} سم • العدد: ${u.quantity} • ${u.glazingMode == "single" ? "مفرد" : "مزدوج"}${u.location.isNotEmpty ? " • ${u.location}" : ""}',
+                style: TextStyle(
+                  color: isDark ? AppColors.slate400 : AppColors.slate600,
+                  fontSize: 12,
+                ),
+              ),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    tooltip: 'فتح في استوديو التصميم',
+                    icon: const Icon(Icons.tune_rounded, color: AppColors.amberPrimary),
+                    onPressed: () {
+                      context.push('/dashboard/owner/projects/${widget.projectId}/units/${u.id}?workshopId=$workshopId', extra: u);
+                    },
+                  ),
+                  IconButton(
+                    tooltip: 'حذف',
+                    icon: const Icon(Icons.delete_outline_rounded, color: AppColors.error),
+                    onPressed: () async {
+                      final confirm = await showDialog<bool>(
+                        context: context,
+                        builder: (ctx) => AlertDialog(
+                          title: const Text('تأكيد الحذف'),
+                          content: Text('هل أنت متأكد من حذف "${u.name}"؟'),
+                          actions: [
+                            TextButton(onPressed: () => ctx.pop(false), child: const Text('إلغاء')),
+                            ElevatedButton(
+                              style: ElevatedButton.styleFrom(backgroundColor: AppColors.error),
+                              onPressed: () => ctx.pop(true),
+                              child: const Text('حذف'),
+                            ),
+                          ],
+                        ),
+                      );
+                      if (confirm == true) {
+                        await ref.read(projectsRepositoryProvider).deleteUnit(workshopId, widget.projectId, u.id);
+                      }
+                    },
+                  ),
+                ],
+              ),
+              onTap: () {
+                context.push('/dashboard/owner/projects/${widget.projectId}/units/${u.id}?workshopId=$workshopId', extra: u);
+              },
+            ),
+          );
+        }),
+      ],
     );
   }
 
-  Widget _buildProjectCuttingTab(BuildContext context, List<ProjectUnit> units) {
+  Widget _buildProjectCuttingTab(BuildContext context, List<ProjectUnit> units, String workshopId) {
     if (units.isEmpty) {
-      return const Center(child: Text('لا توجد عناصر لحساب التقطيع'));
+      return const Center(child: Text('لا توجد عناصر لحساب التتقطيع'));
     }
 
-    const engine = CalculatorEngine();
+    final engine = ref.watch(calculatorEngineProvider(workshopId));
     final allPieces = <CutPiece>[];
     var totalGlassArea = 0.0;
     var totalGlassWeight = 0.0;
@@ -320,34 +369,40 @@ class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> with 
     );
   }
 
-  Widget _buildProjectBarsTab(BuildContext context, List<ProjectUnit> units) {
+  Widget _buildProjectBarsTab(BuildContext context, List<ProjectUnit> units, String workshopId) {
     if (units.isEmpty) {
       return const Center(child: Text('لا توجد عناصر لحساب القضبان'));
     }
 
-    const engine = CalculatorEngine();
+    final engine = ref.watch(calculatorEngineProvider(workshopId));
+    final optimizer = ref.watch(cuttingOptimizerProvider(workshopId)).value;
     final allPieces = <CutPiece>[];
     for (var uIdx = 0; uIdx < units.length; uIdx++) {
       final u = units[uIdx];
       final unitLabel = u.name.trim().isNotEmpty ? u.name.trim() : 'W${uIdx + 1}';
       final res = engine.calculate(u.toEngineSpec());
-      for (final p in res.pieces) {
-        allPieces.add(
-          CutPiece(
-            itemCode: p.itemCode,
-            nameArabic: p.nameArabic,
-            lengthCm: p.lengthCm,
-            quantity: p.quantity * u.quantity,
-            profileType: p.profileType,
-            unitTag: unitLabel,
-          ),
-        );
+      for (var copy = 1; copy <= u.quantity; copy++) {
+        final tag = u.quantity > 1 ? '$unitLabel (#$copy)' : unitLabel;
+        for (final p in res.pieces) {
+          allPieces.add(
+            CutPiece(
+              itemCode: p.itemCode,
+              nameArabic: p.nameArabic,
+              lengthCm: p.lengthCm,
+              quantity: p.quantity,
+              cutAngleLeft: p.cutAngleLeft,
+              cutAngleRight: p.cutAngleRight,
+              profileType: p.profileType,
+              unitTag: tag,
+            ),
+          );
+        }
       }
     }
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
-      child: BarLayoutView(pieces: allPieces),
+      child: BarLayoutView(pieces: allPieces, optimizer: optimizer),
     );
   }
 }

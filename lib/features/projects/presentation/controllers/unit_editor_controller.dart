@@ -1,5 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:maqyas_engine/maqyas_engine.dart';
+import '../../../../features/auth/presentation/controllers/auth_controller.dart';
+import '../../../../features/rules/data/rules_repository.dart';
 import '../../data/projects_repository.dart';
 import '../../domain/models/project_unit.dart';
 
@@ -120,7 +122,12 @@ class UnitEditorState {
 }
 
 class UnitEditorNotifier extends Notifier<UnitEditorState> {
-  final CalculatorEngine _engine = const CalculatorEngine();
+  CalculatorEngine get _engine {
+    final activeId = ref.read(activeWorkshopIdProvider);
+    final user = ref.read(currentUserProvider).value;
+    final workshopId = activeId ?? (user?.workshopId ?? '');
+    return ref.read(calculatorEngineProvider(workshopId));
+  }
 
   @override
   UnitEditorState build() {

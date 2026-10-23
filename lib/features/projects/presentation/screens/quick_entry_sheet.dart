@@ -3,16 +3,19 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:maqyas_engine/maqyas_engine.dart';
 import 'package:meqyas/app/theme/app_colors.dart';
 import 'package:meqyas/features/auth/presentation/controllers/auth_controller.dart';
+import '../../../../features/rules/data/rules_repository.dart';
 import '../../data/projects_repository.dart';
 import '../../domain/models/project_unit.dart';
 
 class QuickEntrySheet extends ConsumerStatefulWidget {
   final String projectId;
+  final String? workshopId;
   final VoidCallback? onUnitAdded;
 
   const QuickEntrySheet({
     super.key,
     required this.projectId,
+    this.workshopId,
     this.onUnitAdded,
   });
 
@@ -76,8 +79,15 @@ class _QuickEntrySheetState extends ConsumerState<QuickEntrySheet> {
       return;
     }
 
+    final activeId = ref.read(activeWorkshopIdProvider);
+    final currentUser = ref.read(currentUserProvider).value;
+    final workshopId = (widget.workshopId != null && widget.workshopId!.isNotEmpty)
+        ? widget.workshopId!
+        : (activeId ?? (currentUser?.workshopId ?? ''));
+    if (workshopId.isEmpty) return;
+
     // Engineering Validation (Never allow unmanufacturable dimensions)
-    const engine = CalculatorEngine();
+    final engine = ref.read(calculatorEngineProvider(workshopId));
     final spec = UnitSpecification(
       widthCm: width,
       heightCm: height,
@@ -97,10 +107,6 @@ class _QuickEntrySheetState extends ConsumerState<QuickEntrySheet> {
       );
       return;
     }
-
-    final currentUser = ref.read(currentUserProvider).value;
-    final workshopId = currentUser?.workshopId ?? '';
-    if (workshopId.isEmpty) return;
 
     setState(() => _isSaving = true);
 

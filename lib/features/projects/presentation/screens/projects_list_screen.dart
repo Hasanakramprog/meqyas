@@ -3,13 +3,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:meqyas/app/theme/app_colors.dart';
 import 'package:meqyas/features/auth/presentation/controllers/auth_controller.dart';
+import '../../../../features/rules/data/rules_repository.dart';
 import '../../data/projects_repository.dart';
 import '../../domain/models/project.dart';
 
-final workshopProjectsProvider = StreamProvider.autoDispose.family<List<Project>, String>((ref, workshopId) {
-  final repo = ref.watch(projectsRepositoryProvider);
-  return repo.watchProjects(workshopId);
-});
 
 class ProjectsListScreen extends ConsumerStatefulWidget {
   const ProjectsListScreen({super.key});
@@ -26,18 +23,60 @@ class _ProjectsListScreenState extends ConsumerState<ProjectsListScreen> {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final currentUser = ref.watch(currentUserProvider).value;
-    final workshopId = currentUser?.workshopId ?? '';
+    final ownerUid = currentUser?.uid ?? '';
 
-    final projectsAsync = ref.watch(workshopProjectsProvider(workshopId));
+    final workshops = ref.watch(ownerWorkshopsProvider(ownerUid)).value ?? [];
+    final activeWorkshopId = ref.watch(activeWorkshopIdProvider) ??
+        (workshops.isNotEmpty ? workshops.first.id : (currentUser?.workshopId ?? ''));
+
+    final projectsAsync = ref.watch(workshopProjectsProvider(activeWorkshopId));
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('مشاريع الورشة'),
+        title: workshops.length > 1
+            ? DropdownButtonHideUnderline(
+                child: DropdownButton<String>(
+                  value: workshops.any((w) => w.id == activeWorkshopId)
+                      ? activeWorkshopId
+                      : workshops.first.id,
+                  icon: const Icon(Icons.arrow_drop_down_rounded, color: AppColors.amberPrimary),
+                  dropdownColor: isDark ? AppColors.darkCard : AppColors.lightSurface,
+                  items: workshops.map((w) {
+                    return DropdownMenuItem(
+                      value: w.id,
+                      child: Text(
+                        w.name,
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                      ),
+                    );
+                  }).toList(),
+                  onChanged: (newId) {
+                    if (newId != null) {
+                      ref.read(activeWorkshopIdProvider.notifier).setWorkshopId(newId);
+                    }
+                  },
+                ),
+              )
+            : Text(
+                workshops.isNotEmpty ? 'مشاريع ${workshops.first.name}' : 'مشاريع الورشة',
+              ),
         actions: [
+          IconButton(
+            tooltip: 'إضافة ورشة جديدة',
+            icon: const Icon(Icons.add_home_work_rounded, color: AppColors.amberPrimary),
+            onPressed: () => _showNewWorkshopDialog(context),
+          ),
+          IconButton(
+            tooltip: 'إعدادات وقواعد الورشة',
+            icon: const Icon(Icons.tune_rounded, color: AppColors.amberPrimary),
+            onPressed: () {
+              context.push('/dashboard/owner/rules?workshopId=$activeWorkshopId');
+            },
+          ),
           IconButton(
             tooltip: 'مشروع جديد',
             icon: const Icon(Icons.add_business_rounded, color: AppColors.amberPrimary),
-            onPressed: () => _showNewProjectDialog(context, workshopId),
+            onPressed: () => _showNewProjectDialog(context, activeWorkshopId),
           ),
           const SizedBox(width: 8),
         ],
@@ -90,7 +129,7 @@ class _ProjectsListScreenState extends ConsumerState<ProjectsListScreen> {
                           ElevatedButton.icon(
                             icon: const Icon(Icons.add_rounded),
                             label: const Text('إنشاء مشروع جديد'),
-                            onPressed: () => _showNewProjectDialog(context, workshopId),
+                            onPressed: () => _showNewProjectDialog(context, activeWorkshopId),
                           ),
                         ],
                       ),
@@ -108,7 +147,7 @@ class _ProjectsListScreenState extends ConsumerState<ProjectsListScreen> {
                       child: InkWell(
                         borderRadius: BorderRadius.circular(12),
                         onTap: () {
-                          context.push('/dashboard/owner/projects/${project.id}');
+                          context.push('/dashboard/owner/projects/${project.id}?workshopId=$activeWorkshopId');
                         },
                         child: Padding(
                           padding: const EdgeInsets.all(16),
@@ -197,7 +236,7 @@ class _ProjectsListScreenState extends ConsumerState<ProjectsListScreen> {
       floatingActionButton: FloatingActionButton.extended(
         icon: const Icon(Icons.add_rounded),
         label: const Text('مشروع جديد'),
-        onPressed: () => _showNewProjectDialog(context, workshopId),
+        onPressed: () => _showNewProjectDialog(context, activeWorkshopId),
       ),
     );
   }
@@ -282,12 +321,127 @@ class _ProjectsListScreenState extends ConsumerState<ProjectsListScreen> {
               final newId = await ref.read(projectsRepositoryProvider).createProject(project);
               if (ctx.mounted) {
                 ctx.pop();
-                context.push('/dashboard/owner/projects/$newId');
+                context.push('/dashboard/owner/projects/$newId?workshopId=$workshopId');
               }
             },
             child: const Text('إنشاء ومتابعة'),
           ),
         ],
+      ),
+    );
+  }
+
+  void _showNewWorkshopDialog(BuildContext context) {
+    final nameCtrl = TextEditingController();
+    final locationCtrl = TextEditingController();
+    final phoneCtrl = TextEditingController();
+    bool isSaving = false;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            title: const Row(
+              children: [
+                Icon(Icons.add_home_work_rounded, color: AppColors.amberPrimary),
+                SizedBox(width: 8),
+                Text('إضافة ورشة عمل جديدة'),
+              ],
+            ),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    'يمكنك إنشاء ورشة جديدة مستقلة بمشاريعها الخاصة وقواعد التقطيع وإعدادات المنشار.',
+                    style: TextStyle(fontSize: 12, color: AppColors.slate400),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: nameCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'اسم الورشة *',
+                      hintText: 'مثال: ورشة الأمل للألمنيوم',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.storefront_rounded),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: locationCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'الموقع / المدينة',
+                      hintText: 'مثال: الرياض - حي السلي',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.location_on_outlined),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: phoneCtrl,
+                    keyboardType: TextInputType.phone,
+                    decoration: const InputDecoration(
+                      labelText: 'رقم هاتف الورشة',
+                      hintText: 'مثال: 05xxxxxxxx',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.phone_outlined),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: isSaving ? null : () => ctx.pop(),
+                child: const Text('إلغاء'),
+              ),
+              ElevatedButton(
+                onPressed: isSaving
+                    ? null
+                    : () async {
+                        final name = nameCtrl.text.trim();
+                        if (name.isEmpty) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('يرجى إدخال اسم الورشة')),
+                          );
+                          return;
+                        }
+
+                        setDialogState(() => isSaving = true);
+                        try {
+                          final repo = ref.read(rulesRepositoryProvider);
+                          final newId = await repo.createWorkshop(
+                            name: name,
+                            location: locationCtrl.text.trim(),
+                            phone: phoneCtrl.text.trim(),
+                          );
+
+                          ref.read(activeWorkshopIdProvider.notifier).setWorkshopId(newId);
+
+                          if (context.mounted) {
+                            ctx.pop();
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('تم إنشاء ورشة "$name" بنجاح')),
+                            );
+                          }
+                        } catch (e) {
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('فشل إنشاء الورشة: $e')),
+                            );
+                          }
+                        } finally {
+                          setDialogState(() => isSaving = false);
+                        }
+                      },
+                child: isSaving
+                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Text('إنشاء الورشة'),
+              ),
+            ],
+          );
+        },
       ),
     );
   }

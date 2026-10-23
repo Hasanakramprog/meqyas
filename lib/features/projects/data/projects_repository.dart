@@ -5,7 +5,9 @@ import '../domain/models/project_unit.dart';
 
 abstract class ProjectsRepository {
   Stream<List<Project>> watchProjects(String workshopId);
+  Stream<Project?> watchProject(String workshopId, String projectId);
   Future<Project?> getProject(String workshopId, String projectId);
+  Future<String?> findProjectWorkshop(List<String> workshopIds, String projectId);
   Future<String> createProject(Project project);
   Future<void> updateProject(Project project);
   Future<void> deleteProject(String workshopId, String projectId);
@@ -38,10 +40,28 @@ class FirestoreProjectsRepository implements ProjectsRepository {
   }
 
   @override
+  Stream<Project?> watchProject(String workshopId, String projectId) {
+    if (workshopId.isEmpty || projectId.isEmpty) return Stream.value(null);
+    return _projectsCol(workshopId).doc(projectId).snapshots().map((doc) {
+      if (!doc.exists) return null;
+      return Project.fromFirestore(doc);
+    });
+  }
+
+  @override
   Future<Project?> getProject(String workshopId, String projectId) async {
     final doc = await _projectsCol(workshopId).doc(projectId).get();
     if (!doc.exists) return null;
     return Project.fromFirestore(doc);
+  }
+
+  @override
+  Future<String?> findProjectWorkshop(List<String> workshopIds, String projectId) async {
+    for (final wid in workshopIds) {
+      final doc = await _projectsCol(wid).doc(projectId).get();
+      if (doc.exists) return wid;
+    }
+    return null;
   }
 
   @override
@@ -112,10 +132,10 @@ class FirestoreProjectsRepository implements ProjectsRepository {
 
       final batch = _firestore.batch();
       batch.set(docRef, newUnit.toMap());
-      batch.update(projectRef, {
+      batch.set(projectRef, {
         'unitCount': FieldValue.increment(1),
         'updatedAt': FieldValue.serverTimestamp(),
-      });
+      }, SetOptions(merge: true));
       await batch.commit();
       return docRef.id;
     } else {
@@ -123,9 +143,9 @@ class FirestoreProjectsRepository implements ProjectsRepository {
       final docRef = col.doc(unit.id);
       final batch = _firestore.batch();
       batch.set(docRef, unit.toMap(), SetOptions(merge: true));
-      batch.update(projectRef, {
+      batch.set(projectRef, {
         'updatedAt': FieldValue.serverTimestamp(),
-      });
+      }, SetOptions(merge: true));
       await batch.commit();
       return unit.id;
     }
@@ -135,14 +155,19 @@ class FirestoreProjectsRepository implements ProjectsRepository {
   Future<void> deleteUnit(String workshopId, String projectId, String unitId) async {
     final batch = _firestore.batch();
     batch.delete(_unitsCol(workshopId, projectId).doc(unitId));
-    batch.update(_projectsCol(workshopId).doc(projectId), {
+    batch.set(_projectsCol(workshopId).doc(projectId), {
       'unitCount': FieldValue.increment(-1),
       'updatedAt': FieldValue.serverTimestamp(),
-    });
+    }, SetOptions(merge: true));
     await batch.commit();
   }
 }
 
 final projectsRepositoryProvider = Provider<ProjectsRepository>((ref) {
   return FirestoreProjectsRepository();
+});
+
+final workshopProjectsProvider = StreamProvider.autoDispose.family<List<Project>, String>((ref, workshopId) {
+  final repo = ref.watch(projectsRepositoryProvider);
+  return repo.watchProjects(workshopId);
 });

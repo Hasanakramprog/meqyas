@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:maqyas_engine/maqyas_engine.dart';
 import 'package:meqyas/app/theme/app_colors.dart';
 import 'package:meqyas/features/auth/presentation/controllers/auth_controller.dart';
+import '../../../../features/rules/data/rules_repository.dart';
 import '../../domain/models/project_unit.dart';
 import '../controllers/unit_editor_controller.dart';
 import '../widgets/accessories_summary_view.dart';
@@ -13,11 +15,13 @@ import '../widgets/window_drawing_canvas.dart';
 class UnitEditorScreen extends ConsumerStatefulWidget {
   final String projectId;
   final ProjectUnit? initialUnit;
+  final String? initialWorkshopId;
 
   const UnitEditorScreen({
     super.key,
     required this.projectId,
     this.initialUnit,
+    this.initialWorkshopId,
   });
 
   @override
@@ -67,8 +71,9 @@ class _UnitEditorScreenState extends ConsumerState<UnitEditorScreen>
 
     final state = ref.watch(unitEditorProvider);
     final notifier = ref.read(unitEditorProvider.notifier);
+    final activeId = ref.watch(activeWorkshopIdProvider);
     final currentUser = ref.watch(currentUserProvider).value;
-    final workshopId = currentUser?.workshopId ?? '';
+    final workshopId = widget.initialWorkshopId ?? activeId ?? (currentUser?.workshopId ?? '');
 
     return Scaffold(
       appBar: AppBar(
@@ -247,7 +252,10 @@ class _UnitEditorScreenState extends ConsumerState<UnitEditorScreen>
                   child: CuttingListView(result: state.calculationResult),
                 ),
                 _buildScrollableTab(
-                  child: BarLayoutView(pieces: state.calculationResult.pieces),
+                  child: BarLayoutView(
+                    pieces: _buildEditorBarPieces(state),
+                    optimizer: ref.watch(cuttingOptimizerProvider(workshopId)).value,
+                  ),
                 ),
                 _buildScrollableTab(
                   child: AccessoriesSummaryView(accessories: state.calculationResult.accessories),
@@ -487,5 +495,32 @@ class _UnitEditorScreenState extends ConsumerState<UnitEditorScreen>
           ),
         ],
       );
+  }
+
+  List<CutPiece> _buildEditorBarPieces(UnitEditorState state) {
+    final unitLabel = state.name.trim().isNotEmpty
+        ? state.name.trim()
+        : (state.unitType == 'window' ? 'شباك' : 'عنصر');
+    final qty = state.quantity > 0 ? state.quantity : 1;
+    final allPieces = <CutPiece>[];
+
+    for (var copy = 1; copy <= qty; copy++) {
+      final tag = qty > 1 ? '$unitLabel (#$copy)' : unitLabel;
+      for (final p in state.calculationResult.pieces) {
+        allPieces.add(
+          CutPiece(
+            itemCode: p.itemCode,
+            nameArabic: p.nameArabic,
+            lengthCm: p.lengthCm,
+            quantity: p.quantity,
+            cutAngleLeft: p.cutAngleLeft,
+            cutAngleRight: p.cutAngleRight,
+            profileType: p.profileType,
+            unitTag: tag,
+          ),
+        );
+      }
+    }
+    return allPieces;
   }
 }

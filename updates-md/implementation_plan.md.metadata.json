@@ -1,0 +1,6 @@
+{
+  "summary": "Phase 4 (Admin Rules) implementation plan: engine changes to make items rule-driven, Firestore data model for calculationRules/profileSystems/auditLogs, Cloud Functions for rule lifecycle with audit, admin UI (rule list, editor, live sandbox, version history), app-side rules sync with offline fallback, pinned versions + recalculate banner, tests and verification. Incorporates user decisions: single-step approval, test-matrix conflict detection, tablet/web-optimized admin UI, pinned rule versions with recalculate.",
+  "updatedAt": "2026-10-21T08:29:15.250214Z",
+  "requestFeedback": true,
+  "userFacing": true
+}

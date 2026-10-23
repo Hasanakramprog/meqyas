@@ -16,7 +16,10 @@ export 'src/models/optimization_models.dart';
 export 'src/models/unit_specification.dart';
 
 // Rules & Seed
+export 'src/rules/conflict_detector.dart';
+export 'src/rules/rule_sandbox.dart';
 export 'src/rules/rule_selector.dart';
+export 'src/rules/rule_validator.dart';
 export 'src/rules/seed_rules.dart';
 
 // Engine

@@ -16,6 +16,8 @@ import '../../features/projects/domain/models/project_unit.dart';
 import '../../features/projects/presentation/screens/project_detail_screen.dart';
 import '../../features/projects/presentation/screens/projects_list_screen.dart';
 import '../../features/projects/presentation/screens/unit_editor_screen.dart';
+import '../../features/rules/presentation/admin_rules_screen.dart';
+import '../../features/rules/presentation/workshop_rules_screen.dart';
 
 class RouterNotifier extends ChangeNotifier {
   final Ref _ref;
@@ -141,6 +143,14 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => const OwnerDashboardScreen(),
         routes: [
           GoRoute(
+            path: 'rules',
+            name: 'owner_rules',
+            builder: (context, state) {
+              final wid = state.uri.queryParameters['workshopId'];
+              return WorkshopRulesScreen(initialWorkshopId: wid);
+            },
+          ),
+          GoRoute(
             path: 'projects',
             name: 'owner_projects',
             builder: (context, state) => const ProjectsListScreen(),
@@ -150,7 +160,11 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                 name: 'project_detail',
                 builder: (context, state) {
                   final projectId = state.pathParameters['projectId']!;
-                  return ProjectDetailScreen(projectId: projectId);
+                  final workshopId = state.uri.queryParameters['workshopId'];
+                  return ProjectDetailScreen(
+                    projectId: projectId,
+                    initialWorkshopId: workshopId,
+                  );
                 },
                 routes: [
                   GoRoute(
@@ -158,7 +172,11 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                     name: 'new_unit',
                     builder: (context, state) {
                       final projectId = state.pathParameters['projectId']!;
-                      return UnitEditorScreen(projectId: projectId);
+                      final workshopId = state.uri.queryParameters['workshopId'];
+                      return UnitEditorScreen(
+                        projectId: projectId,
+                        initialWorkshopId: workshopId,
+                      );
                     },
                   ),
                   GoRoute(
@@ -166,8 +184,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                     name: 'edit_unit',
                     builder: (context, state) {
                       final projectId = state.pathParameters['projectId']!;
+                      final workshopId = state.uri.queryParameters['workshopId'];
                       final unit = state.extra as ProjectUnit?;
-                      return UnitEditorScreen(projectId: projectId, initialUnit: unit);
+                      return UnitEditorScreen(
+                        projectId: projectId,
+                        initialUnit: unit,
+                        initialWorkshopId: workshopId,
+                      );
                     },
                   ),
                 ],
@@ -185,6 +208,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: '/dashboard/admin',
         name: 'admin_dashboard',
         builder: (context, state) => const AdminDashboardScreen(),
+        routes: [
+          GoRoute(
+            path: 'rules',
+            name: 'admin_rules',
+            builder: (context, state) => const AdminRulesScreen(),
+          ),
+        ],
       ),
     ],
   );
