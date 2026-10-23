@@ -1,7 +1,7 @@
 import * as admin from "firebase-admin";
 import { FieldValue, getFirestore } from "firebase-admin/firestore";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
-import { onDocumentWritten } from "firebase-functions/v2/firestore";
+import { onDocumentWritten, onDocumentDeleted } from "firebase-functions/v2/firestore";
 
 admin.initializeApp();
 const db = getFirestore();
@@ -301,3 +301,58 @@ export const logRuleDraftChange = onDocumentWritten("calculationRules/{ruleId}",
     }
   }
 });
+
+/**
+ * Triggered whenever a project is deleted (from client or emulator/console).
+ * Automatically cleans up units subcollection, cutPlans, and remnants originating from this project,
+ * and restores any shelf remnants that were consumed by this project.
+ */
+export const onProjectDeleted = onDocumentDeleted(
+  "workshops/{workshopId}/projects/{projectId}",
+  async (event) => {
+    const { workshopId, projectId } = event.params;
+    const batch = db.batch();
+
+    // 1. Delete units subcollection
+    const unitsSnap = await db
+      .collection(`workshops/${workshopId}/projects/${projectId}/units`)
+      .get();
+    unitsSnap.forEach((doc) => batch.delete(doc.ref));
+
+    // 2. Delete cut plans for this project
+    const plansSnap = await db
+      .collection(`workshops/${workshopId}/cutPlans`)
+      .where("projectId", "==", projectId)
+      .get();
+    const planIds: string[] = [];
+    plansSnap.forEach((doc) => {
+      planIds.push(doc.id);
+      batch.delete(doc.ref);
+    });
+
+    // 3. Delete remnants originating from this project
+    const remnantsSnap = await db
+      .collection(`workshops/${workshopId}/remnants`)
+      .where("sourceProjectId", "==", projectId)
+      .get();
+    remnantsSnap.forEach((doc) => batch.delete(doc.ref));
+
+    // 4. Restore shelf remnants consumed by this project's plans
+    if (planIds.length > 0) {
+      const consumedSnap = await db
+        .collection(`workshops/${workshopId}/remnants`)
+        .where("usedInPlanId", "in", planIds.slice(0, 10))
+        .get();
+      consumedSnap.forEach((doc) => {
+        batch.update(doc.ref, {
+          state: "available",
+          usedAt: FieldValue.delete(),
+          usedInPlanId: FieldValue.delete(),
+        });
+      });
+    }
+
+    await batch.commit();
+  }
+);
+

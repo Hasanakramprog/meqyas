@@ -134,14 +134,67 @@ class CutPlanRepository {
     required OptimizationResult result,
     required double minRemnantCm,
   }) async {
+    final batch = _firestore.batch();
+    final now = FieldValue.serverTimestamp();
+
+    // 1. Delete previous cut plans for this project
+    final existingPlans = await _firestore
+        .collection('workshops')
+        .doc(workshopId)
+        .collection('cutPlans')
+        .where('projectId', isEqualTo: projectId)
+        .get();
+
+    final oldPlanIds = existingPlans.docs.map((d) => d.id).toSet();
+    for (final doc in existingPlans.docs) {
+      batch.delete(doc.reference);
+    }
+
+    // 2. Delete existing AVAILABLE remnants originating from this project
+    // (they are superseded by the new cut plan calculation)
+    final existingRemnants = await _firestore
+        .collection('workshops')
+        .doc(workshopId)
+        .collection('remnants')
+        .where('sourceProjectId', isEqualTo: projectId)
+        .get();
+
+    for (final doc in existingRemnants.docs) {
+      final state = doc.data()['state'];
+      if (state == 'available') {
+        batch.delete(doc.reference);
+      }
+    }
+
+    // 3. If an old plan consumed shelf remnants that are NOT consumed by the new plan,
+    // restore them back to 'available'
+    if (oldPlanIds.isNotEmpty) {
+      final consumedByOldPlans = await _firestore
+          .collection('workshops')
+          .doc(workshopId)
+          .collection('remnants')
+          .where('usedInPlanId', whereIn: oldPlanIds.toList().take(10).toList())
+          .get();
+
+      final newlyConsumed = result.consumedRemnantIds.toSet();
+      for (final rDoc in consumedByOldPlans.docs) {
+        if (!newlyConsumed.contains(rDoc.id)) {
+          batch.update(rDoc.reference, {
+            'state': 'available',
+            'usedAt': FieldValue.delete(),
+            'usedInPlanId': FieldValue.delete(),
+          });
+        }
+      }
+    }
+
+    // 4. Create new cut plan document
     final planRef = _firestore
         .collection('workshops')
         .doc(workshopId)
         .collection('cutPlans')
         .doc();
     final planId = planRef.id;
-    final now = FieldValue.serverTimestamp();
-    final batch = _firestore.batch();
 
     // Build itemGroups from barPlans
     final itemGroupsMap = <String, Map<String, dynamic>>{};
