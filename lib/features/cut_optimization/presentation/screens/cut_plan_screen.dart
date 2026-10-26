@@ -135,11 +135,14 @@ class _CutPlanScreenState extends ConsumerState<CutPlanScreen> {
             // Build cut pieces from all units
             final allPieces = _buildPieces(units, ref);
 
-            final savedCutsCount = savedPlan?.result.barPlans.fold<int>(0, (s, b) => s + b.cuts.length) ?? 0;
-            final currentTotalLength = allPieces.fold<double>(0, (s, p) => s + (p.lengthCm * p.quantity));
+            final currentTotalCuts = allPieces.fold<int>(0, (acc, p) => acc + p.quantity);
+            final currentTotalLength = allPieces.fold<double>(0, (acc, p) => acc + (p.lengthCm * p.quantity));
+
+            final savedCutsCount = (savedPlan?.result.barPlans.fold<int>(0, (s, b) => s + b.cuts.length) ?? 0) +
+                (savedPlan?.result.oversizedCuts.length ?? 0);
             final savedTotalLength = savedPlan?.result.summary.totalCutLengthCm ?? 0;
             final hasUnitsChangedSinceSave = savedPlan != null &&
-                (allPieces.length != savedCutsCount || (currentTotalLength - savedTotalLength).abs() > 0.5);
+                (currentTotalCuts != savedCutsCount || (currentTotalLength - savedTotalLength).abs() > 0.5);
 
             if (_result == null) {
               if (savedPlan != null) {
@@ -190,7 +193,7 @@ class _CutPlanScreenState extends ConsumerState<CutPlanScreen> {
                         ),
                         const SizedBox(height: 6),
                         Text(
-                          'الخطة المحفوظة أدناه تحتوي على ($savedCutsCount قطعة) بينما المشروع حالياً يحتوي على (${allPieces.length} قطعة). الخطة الحالية لا تشمل التعديلات الأخيرة.',
+                          'الخطة المحفوظة أدناه تحتوي على ($savedCutsCount قطعة) بينما المشروع حالياً يحتوي على ($currentTotalCuts قطعة). الخطة الحالية لا تشمل التعديلات الأخيرة.',
                           style: TextStyle(
                             fontSize: 12,
                             color: isDark ? AppColors.slate300 : AppColors.slate700,
