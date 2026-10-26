@@ -54,7 +54,7 @@ class _CutPlanScreenState extends ConsumerState<CutPlanScreen> {
     final projectAsync = ref.watch(projectDetailProvider(query));
     final unitsAsync = ref.watch(projectUnitsProvider(query));
     final optimizerAsync = ref.watch(cuttingOptimizerProvider(effectiveWorkshopId));
-    final availableRemnantsAsync = ref.watch(availableRemnantsProvider(effectiveWorkshopId));
+    final allRemnantsAsync = ref.watch(remnantsProvider(effectiveWorkshopId));
     final savedCutPlanAsync = ref.watch(savedCutPlanProvider(query));
 
     return Directionality(
@@ -107,20 +107,34 @@ class _CutPlanScreenState extends ConsumerState<CutPlanScreen> {
             if (units.isEmpty) {
               return const Center(child: Text('لا توجد وحدات في هذا المشروع'));
             }
-            if (availableRemnantsAsync.isLoading || savedCutPlanAsync.isLoading) {
+            if (allRemnantsAsync.isLoading || savedCutPlanAsync.isLoading) {
               return const Center(child: CircularProgressIndicator());
             }
 
             final optimizer = optimizerAsync.value ?? const CutOptimizer();
-            // A project can only consume remnants from OTHER projects / shelf stock, never its own
-            final availableRemnants = (availableRemnantsAsync.value ?? [])
-                .where((r) => r.sourceProjectId != widget.projectId)
-                .toList();
+            final savedPlan = savedCutPlanAsync.value;
+            final allRemnants = allRemnantsAsync.value ?? [];
+
+            // A project can consume:
+            // 1. Available shelf remnants from other projects
+            // 2. PLUS remnants that were previously consumed by this project's own saved plan
+            //    (since recalculating supersedes that plan and re-evaluates its inputs)
+            final availableRemnants = allRemnants.where((r) {
+              if (r.sourceProjectId == widget.projectId) return false;
+              if (r.isAvailable) return true;
+              if (savedPlan != null) {
+                if (r.usedInPlanId == savedPlan.id) return true;
+                if (savedPlan.result.consumedRemnantIds.contains(r.id) &&
+                    (r.usedInPlanId == null || r.usedInPlanId == savedPlan.id)) {
+                  return true;
+                }
+              }
+              return false;
+            }).toList();
 
             // Build cut pieces from all units
             final allPieces = _buildPieces(units, ref);
 
-            final savedPlan = savedCutPlanAsync.value;
             final savedCutsCount = savedPlan?.result.barPlans.fold<int>(0, (s, b) => s + b.cuts.length) ?? 0;
             final currentTotalLength = allPieces.fold<double>(0, (s, p) => s + (p.lengthCm * p.quantity));
             final savedTotalLength = savedPlan?.result.summary.totalCutLengthCm ?? 0;
@@ -543,6 +557,7 @@ class _CutPlanScreenState extends ConsumerState<CutPlanScreen> {
           ),
         );
         // Invalidate remnants and saved plan so stock & plan screens refresh
+        ref.invalidate(remnantsProvider(effectiveWorkshopId));
         ref.invalidate(availableRemnantsProvider(effectiveWorkshopId));
         ref.invalidate(savedCutPlanProvider(query));
         setState(() {

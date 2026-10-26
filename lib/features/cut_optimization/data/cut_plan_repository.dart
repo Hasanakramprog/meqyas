@@ -18,6 +18,7 @@ class RemnantDoc {
   final String state; // 'available' | 'used'
   final DateTime createdAt;
   final DateTime? usedAt;
+  final String? usedInPlanId;
 
   const RemnantDoc({
     required this.id,
@@ -31,6 +32,7 @@ class RemnantDoc {
     required this.state,
     required this.createdAt,
     this.usedAt,
+    this.usedInPlanId,
   });
 
   bool get isAvailable => state == 'available';
@@ -63,6 +65,7 @@ class RemnantDoc {
       state: map['state'] as String? ?? 'available',
       createdAt: parseTs(map['createdAt']),
       usedAt: map['usedAt'] != null ? parseTs(map['usedAt']) : null,
+      usedInPlanId: map['usedInPlanId'] as String?,
     );
   }
 
@@ -77,6 +80,7 @@ class RemnantDoc {
         'state': state,
         'createdAt': Timestamp.fromDate(createdAt),
         if (usedAt != null) 'usedAt': Timestamp.fromDate(usedAt!),
+        if (usedInPlanId != null) 'usedInPlanId': usedInPlanId,
       };
 }
 
