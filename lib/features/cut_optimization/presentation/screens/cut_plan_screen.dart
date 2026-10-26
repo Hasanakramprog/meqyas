@@ -42,11 +42,16 @@ class _CutPlanScreenState extends ConsumerState<CutPlanScreen> {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
 
-    final query = (workshopId: widget.workshopId, projectId: widget.projectId);
+    final activeId = ref.watch(activeWorkshopIdProvider);
+    final effectiveWorkshopId = widget.workshopId.isNotEmpty
+        ? widget.workshopId
+        : (activeId ?? '');
+
+    final query = (workshopId: effectiveWorkshopId, projectId: widget.projectId);
     final projectAsync = ref.watch(projectDetailProvider(query));
     final unitsAsync = ref.watch(projectUnitsProvider(query));
-    final optimizerAsync = ref.watch(cuttingOptimizerProvider(widget.workshopId));
-    final availableRemnantsAsync = ref.watch(availableRemnantsProvider(widget.workshopId));
+    final optimizerAsync = ref.watch(cuttingOptimizerProvider(effectiveWorkshopId));
+    final availableRemnantsAsync = ref.watch(availableRemnantsProvider(effectiveWorkshopId));
 
     return Directionality(
       textDirection: TextDirection.rtl,
@@ -97,6 +102,9 @@ class _CutPlanScreenState extends ConsumerState<CutPlanScreen> {
           data: (units) {
             if (units.isEmpty) {
               return const Center(child: Text('لا توجد وحدات في هذا المشروع'));
+            }
+            if (availableRemnantsAsync.isLoading) {
+              return const Center(child: CircularProgressIndicator());
             }
 
             final optimizer = optimizerAsync.value ?? const CutOptimizer();
