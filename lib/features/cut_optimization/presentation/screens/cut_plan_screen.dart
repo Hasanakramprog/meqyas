@@ -727,9 +727,11 @@ class _CutPlanScreenState extends ConsumerState<CutPlanScreen> {
                             children: [
                               Row(
                                 children: [
-                                  const Text(
-                                    'نعم، قُصت بالفعل (فصل كدفعة ثانية)',
-                                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                                  const Expanded(
+                                    child: Text(
+                                      'نعم، قُصت بالفعل (فصل كدفعة ثانية)',
+                                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                                    ),
                                   ),
                                   const SizedBox(width: 6),
                                   Container(

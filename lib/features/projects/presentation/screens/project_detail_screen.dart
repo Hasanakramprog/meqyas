@@ -622,9 +622,11 @@ class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> with 
                               children: [
                                 Row(
                                   children: [
-                                    const Text(
-                                      'نعم، قُصت بالفعل (المنطق الصناعي السليم)',
-                                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                                    const Expanded(
+                                      child: Text(
+                                        'نعم، قُصت بالفعل (المنطق الصناعي السليم)',
+                                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                                      ),
                                     ),
                                     const SizedBox(width: 6),
                                     Container(
