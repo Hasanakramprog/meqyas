@@ -259,10 +259,9 @@ class CutPlanRepository {
           .toList(),
     });
 
-    // Write new remnants (useful leftovers from this plan)
+    // Write new remnants (useful leftovers from this plan: both from new full bars and consumed remnants)
     for (final bar in result.barPlans) {
-      if (bar.isRemnantUseful && !bar.isFromRemnant) {
-        // Only save remnants from NEW full bars (remnant-sourced bars keep their leftover silently)
+      if (bar.isRemnantUseful) {
         final remnantRef = _firestore
             .collection('workshops')
             .doc(workshopId)
@@ -272,12 +271,13 @@ class CutPlanRepository {
           'itemCode': bar.itemCode,
           'nameArabic': bar.cuts.isNotEmpty ? bar.cuts.first.nameArabic : bar.itemCode,
           'color': bar.color,
-          'lengthCm': bar.remainingLengthCm,
+          'lengthCm': (bar.remainingLengthCm * 10).round() / 10,
           'sourceProjectId': projectId,
           'sourceProjectName': projectName,
           'sourcePlanId': planId,
           'state': 'available',
           'createdAt': now,
+          if (bar.sourceRemnantId != null) 'parentRemnantId': bar.sourceRemnantId,
         });
       }
     }
@@ -301,7 +301,7 @@ class CutPlanRepository {
   }
 
   // -------------------------------------------------------------------------
-  // Mark Remnant as Used (manual, from RemnantsScreen)
+  // Mark Remnant as Used / Available (manual, from RemnantsScreen)
   // -------------------------------------------------------------------------
 
   Future<void> markRemnantUsed(String workshopId, String remnantId) async {
@@ -313,6 +313,19 @@ class CutPlanRepository {
         .update({
       'state': 'used',
       'usedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  Future<void> markRemnantAvailable(String workshopId, String remnantId) async {
+    await _firestore
+        .collection('workshops')
+        .doc(workshopId)
+        .collection('remnants')
+        .doc(remnantId)
+        .update({
+      'state': 'available',
+      'usedAt': FieldValue.delete(),
+      'usedInPlanId': FieldValue.delete(),
     });
   }
 }

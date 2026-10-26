@@ -60,8 +60,9 @@ class _RemnantsScreenState extends ConsumerState<RemnantsScreen> {
           data: (allRemnants) {
             final filtered = allRemnants.where((r) {
               if (_showAvailableOnly && !r.isAvailable) return false;
-              if (_filterItemCode != null &&
-                  r.itemCode != _filterItemCode) return false;
+              if (_filterItemCode != null && r.itemCode != _filterItemCode) {
+                return false;
+              }
               return true;
             }).toList();
 
@@ -126,7 +127,7 @@ class _RemnantsScreenState extends ConsumerState<RemnantsScreen> {
                     children: [
                       Expanded(
                         child: DropdownButtonFormField<String?>(
-                          value: _filterItemCode,
+                          initialValue: _filterItemCode,
                           decoration: InputDecoration(
                             labelText: 'تصفية حسب الصنف',
                             border: OutlineInputBorder(
@@ -164,6 +165,8 @@ class _RemnantsScreenState extends ConsumerState<RemnantsScreen> {
                               isDark: isDark,
                               onMarkUsed: (remnantId) =>
                                   _markUsed(remnantId),
+                              onMarkAvailable: (remnantId) =>
+                                  _markAvailable(remnantId),
                             );
                           }).toList(),
                         ),
@@ -235,6 +238,38 @@ class _RemnantsScreenState extends ConsumerState<RemnantsScreen> {
       }
     }
   }
+
+  Future<void> _markAvailable(String remnantId) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('إرجاع للمتاح'),
+        content: const Text(
+            'هل تريد إعادة هذه الفضلة إلى قائمة الفضلات المتاحة للاستخدام؟'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('إلغاء')),
+          ElevatedButton(
+              style:
+                  ElevatedButton.styleFrom(backgroundColor: AppColors.success),
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('نعم، أعدها للمتاح',
+                  style: TextStyle(color: Colors.white))),
+        ],
+      ),
+    );
+    if (confirm == true && mounted) {
+      await ref
+          .read(cutPlanRepositoryProvider)
+          .markRemnantAvailable(widget.workshopId, remnantId);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('تمت إعادة الفضلة إلى المخزن المتاح ✅')),
+        );
+      }
+    }
+  }
 }
 
 // ── Item Group Section ────────────────────────────────────────────────────────
@@ -244,12 +279,14 @@ class _ItemGroupSection extends StatefulWidget {
   final List<RemnantDoc> remnants;
   final bool isDark;
   final void Function(String id) onMarkUsed;
+  final void Function(String id) onMarkAvailable;
 
   const _ItemGroupSection({
     required this.itemCode,
     required this.remnants,
     required this.isDark,
     required this.onMarkUsed,
+    required this.onMarkAvailable,
   });
 
   @override
@@ -322,6 +359,7 @@ class _ItemGroupSectionState extends State<_ItemGroupSection> {
                   remnant: r,
                   isDark: widget.isDark,
                   onMarkUsed: () => widget.onMarkUsed(r.id),
+                  onMarkAvailable: () => widget.onMarkAvailable(r.id),
                 )),
         ],
       ),
@@ -335,11 +373,13 @@ class _RemnantTile extends StatelessWidget {
   final RemnantDoc remnant;
   final bool isDark;
   final VoidCallback onMarkUsed;
+  final VoidCallback onMarkAvailable;
 
   const _RemnantTile({
     required this.remnant,
     required this.isDark,
     required this.onMarkUsed,
+    required this.onMarkAvailable,
   });
 
   @override
@@ -464,6 +504,18 @@ class _RemnantTile extends StatelessWidget {
                     const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               ),
               child: const Text('تم\nاستخدامها',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 11)),
+            )
+          else
+            TextButton(
+              onPressed: onMarkAvailable,
+              style: TextButton.styleFrom(
+                foregroundColor: AppColors.success,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              ),
+              child: const Text('إرجاع\nللمتاح',
                   textAlign: TextAlign.center,
                   style: TextStyle(fontSize: 11)),
             ),
