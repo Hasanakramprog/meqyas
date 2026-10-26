@@ -121,6 +121,12 @@ class _CutPlanScreenState extends ConsumerState<CutPlanScreen> {
             final allPieces = _buildPieces(units, ref);
 
             final savedPlan = savedCutPlanAsync.value;
+            final savedCutsCount = savedPlan?.result.barPlans.fold<int>(0, (s, b) => s + b.cuts.length) ?? 0;
+            final currentTotalLength = allPieces.fold<double>(0, (s, p) => s + (p.lengthCm * p.quantity));
+            final savedTotalLength = savedPlan?.result.summary.totalCutLengthCm ?? 0;
+            final hasUnitsChangedSinceSave = savedPlan != null &&
+                (allPieces.length != savedCutsCount || (currentTotalLength - savedTotalLength).abs() > 0.5);
+
             if (_result == null) {
               if (savedPlan != null) {
                 _result = savedPlan.result;
@@ -140,7 +146,61 @@ class _CutPlanScreenState extends ConsumerState<CutPlanScreen> {
             return Column(
               children: [
                 // ── Status Banner for Saved Plan ──────────────────────
-                if (_savedAt != null && !_hasUnsavedChanges)
+                if (_savedAt != null && !_hasUnsavedChanges && hasUnitsChangedSinceSave)
+                  Container(
+                    margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: AppColors.warning.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: AppColors.warning.withValues(alpha: 0.5)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(Icons.warning_amber_rounded, color: AppColors.warning, size: 20),
+                            const SizedBox(width: 8),
+                            const Expanded(
+                              child: Text(
+                                'تم تعديل وحدات المشروع بعد حفظ هذه الخطة!',
+                                style: TextStyle(
+                                  color: AppColors.warning,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          'الخطة المحفوظة أدناه تحتوي على ($savedCutsCount قطعة) بينما المشروع حالياً يحتوي على (${allPieces.length} قطعة). الخطة الحالية لا تشمل التعديلات الأخيرة.',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: isDark ? AppColors.slate300 : AppColors.slate700,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppColors.warning,
+                              foregroundColor: Colors.black,
+                              visualDensity: VisualDensity.compact,
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                            ),
+                            icon: const Icon(Icons.refresh_rounded, size: 16),
+                            label: const Text('إعادة حساب الخطة لتشمل الإضافات', style: TextStyle(fontSize: 12)),
+                            onPressed: () => _regenerate(optimizer, allPieces, availableRemnants),
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                else if (_savedAt != null && !_hasUnsavedChanges)
                   Container(
                     margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
                     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
