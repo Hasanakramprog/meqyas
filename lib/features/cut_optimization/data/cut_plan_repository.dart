@@ -80,6 +80,135 @@ class RemnantDoc {
       };
 }
 
+class SavedCutPlan {
+  final String id;
+  final String projectId;
+  final String projectName;
+  final DateTime generatedAt;
+  final String? pdfUrl;
+  final OptimizationResult result;
+
+  const SavedCutPlan({
+    required this.id,
+    required this.projectId,
+    required this.projectName,
+    required this.generatedAt,
+    this.pdfUrl,
+    required this.result,
+  });
+
+  factory SavedCutPlan.fromDoc(DocumentSnapshot doc) {
+    final data = doc.data() as Map<String, dynamic>? ?? {};
+    final summaryData = data['summary'] as Map<String, dynamic>? ?? {};
+    final itemGroups = data['itemGroups'] as List? ?? [];
+    final oversizedData = data['oversizedCuts'] as List? ?? [];
+
+    final summary = OptimizationSummary(
+      totalBarsNeeded: (summaryData['totalBarsNeeded'] as num?)?.toInt() ?? 0,
+      remnantsReused: (summaryData['remnantsReused'] as num?)?.toInt() ?? 0,
+      totalCutLengthCm: (summaryData['totalCutLengthCm'] as num?)?.toDouble() ?? 0,
+      totalTrimLossCm: (summaryData['totalTrimLossCm'] as num?)?.toDouble() ?? 0,
+      totalKerfLossCm: (summaryData['totalKerfLossCm'] as num?)?.toDouble() ?? 0,
+      totalScrapCm: (summaryData['totalScrapCm'] as num?)?.toDouble() ?? 0,
+      totalReusableRemnantsCm: (summaryData['totalReusableRemnantsCm'] as num?)?.toDouble() ?? 0,
+      scrapPercentage: (summaryData['scrapPercentage'] as num?)?.toDouble() ?? 0,
+      barsSavedByRemnants: (summaryData['barsSavedByRemnants'] as num?)?.toDouble() ?? 0,
+    );
+
+    final allBars = <BarCuttingPlan>[];
+    final consumedRemnants = <String>{};
+
+    for (final group in itemGroups) {
+      final g = group as Map<String, dynamic>;
+      final itemCode = g['itemCode'] as String? ?? '';
+      final groupColor = g['color'] as String? ?? 'white';
+      final bars = g['bars'] as List? ?? [];
+
+      for (final b in bars) {
+        final bar = b as Map<String, dynamic>;
+        final cutsData = bar['cuts'] as List? ?? [];
+        final cuts = cutsData.map((c) {
+          final cm = c as Map<String, dynamic>;
+          final fromRem = cm['fromRemnantId'] as String?;
+          if (fromRem != null && fromRem.isNotEmpty) {
+            consumedRemnants.add(fromRem);
+          }
+          return PlannedCut(
+            itemCode: itemCode,
+            nameArabic: cm['nameArabic'] as String? ?? '',
+            lengthCm: (cm['lengthCm'] as num?)?.toDouble() ?? 0,
+            pieceIndex: (cm['pieceIndex'] as num?)?.toInt() ?? 0,
+            unitTag: cm['unitTag'] as String?,
+            fromRemnantId: fromRem,
+          );
+        }).toList();
+
+        final sourceKind = bar['sourceKind'] == 'remnant'
+            ? BarSourceKind.remnant
+            : BarSourceKind.fullBar;
+        final sourceRemId = bar['sourceRemnantId'] as String?;
+        if (sourceRemId != null && sourceRemId.isNotEmpty) {
+          consumedRemnants.add(sourceRemId);
+        }
+
+        allBars.add(
+          BarCuttingPlan(
+            barNumber: (bar['barNumber'] as num?)?.toInt() ?? 1,
+            itemCode: itemCode,
+            color: groupColor,
+            totalBarLengthCm: (bar['totalBarLengthCm'] as num?)?.toDouble() ?? 660.0,
+            trimLossCm: (bar['trimLossCm'] as num?)?.toDouble() ??
+                (sourceKind == BarSourceKind.remnant ? 0.0 : 4.0),
+            kerfPerCutCm: 0.5,
+            cuts: cuts,
+            totalCutsLengthCm: (bar['totalCutsLengthCm'] as num?)?.toDouble() ?? 0,
+            totalKerfLossCm: (bar['kerfLossCm'] as num?)?.toDouble() ?? 0,
+            remainingLengthCm: (bar['remainingLengthCm'] as num?)?.toDouble() ?? 0,
+            isRemnantUseful: bar['isRemnantUseful'] as bool? ?? false,
+            sourceKind: sourceKind,
+            sourceRemnantId: sourceRemId,
+            sourceRemnantLengthCm: (bar['sourceRemnantLengthCm'] as num?)?.toDouble(),
+            sourceRemnantProjectName: bar['sourceRemnantProjectName'] as String?,
+          ),
+        );
+      }
+    }
+
+    allBars.sort((a, b) => a.barNumber.compareTo(b.barNumber));
+
+    final oversizedCuts = oversizedData.map((c) {
+      final cm = c as Map<String, dynamic>;
+      return PlannedCut(
+        itemCode: '',
+        nameArabic: cm['nameArabic'] as String? ?? '',
+        lengthCm: (cm['lengthCm'] as num?)?.toDouble() ?? 0,
+        pieceIndex: 0,
+        unitTag: cm['unitTag'] as String?,
+      );
+    }).toList();
+
+    DateTime parseTs(dynamic v) {
+      if (v is Timestamp) return v.toDate();
+      if (v is String) return DateTime.tryParse(v) ?? DateTime.now();
+      return DateTime.now();
+    }
+
+    return SavedCutPlan(
+      id: doc.id,
+      projectId: data['projectId'] as String? ?? '',
+      projectName: data['projectName'] as String? ?? '',
+      generatedAt: parseTs(data['generatedAt']),
+      pdfUrl: data['pdfUrl'] as String?,
+      result: OptimizationResult(
+        barPlans: allBars,
+        summary: summary,
+        oversizedCuts: oversizedCuts,
+        consumedRemnantIds: consumedRemnants.toList(),
+      ),
+    );
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Repository
 // ---------------------------------------------------------------------------
@@ -215,6 +344,7 @@ class CutPlanRepository {
         if (bar.sourceRemnantProjectName != null)
           'sourceRemnantProjectName': bar.sourceRemnantProjectName,
         'totalBarLengthCm': bar.totalBarLengthCm,
+        'trimLossCm': bar.trimLossCm,
         'totalCutsLengthCm': bar.totalCutsLengthCm,
         'kerfLossCm': bar.totalKerfLossCm,
         'remainingLengthCm': bar.remainingLengthCm,
@@ -328,6 +458,28 @@ class CutPlanRepository {
       'usedInPlanId': FieldValue.delete(),
     });
   }
+
+  // -------------------------------------------------------------------------
+  // Saved Cut Plan — Stream
+  // -------------------------------------------------------------------------
+
+  /// Watches the latest saved cut plan for a specific project.
+  Stream<SavedCutPlan?> watchSavedCutPlan(String workshopId, String projectId) {
+    if (workshopId.isEmpty || projectId.isEmpty) {
+      return Stream.value(null);
+    }
+    return _firestore
+        .collection('workshops')
+        .doc(workshopId)
+        .collection('cutPlans')
+        .where('projectId', isEqualTo: projectId)
+        .limit(1)
+        .snapshots()
+        .map((snap) {
+      if (snap.docs.isEmpty) return null;
+      return SavedCutPlan.fromDoc(snap.docs.first);
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -354,5 +506,17 @@ final availableRemnantsProvider =
         .watch(cutPlanRepositoryProvider)
         .watchRemnants(workshopId)
         .map((list) => list.where((r) => r.isAvailable).toList());
+  },
+);
+
+final savedCutPlanProvider = StreamProvider.autoDispose
+    .family<SavedCutPlan?, ({String workshopId, String projectId})>(
+  (ref, query) {
+    if (query.workshopId.isEmpty || query.projectId.isEmpty) {
+      return Stream.value(null);
+    }
+    return ref
+        .watch(cutPlanRepositoryProvider)
+        .watchSavedCutPlan(query.workshopId, query.projectId);
   },
 );

@@ -3,6 +3,7 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:intl/intl.dart' hide TextDirection;
 import 'package:maqyas_engine/maqyas_engine.dart';
 import 'package:printing/printing.dart';
 import '../../../../app/theme/app_colors.dart';
@@ -36,6 +37,8 @@ class _CutPlanScreenState extends ConsumerState<CutPlanScreen> {
   bool _isExportingPdf = false;
   bool _isExportingLabels = false;
   OptimizationResult? _result;
+  bool _hasUnsavedChanges = false;
+  DateTime? _savedAt;
 
   @override
   Widget build(BuildContext context) {
@@ -52,6 +55,7 @@ class _CutPlanScreenState extends ConsumerState<CutPlanScreen> {
     final unitsAsync = ref.watch(projectUnitsProvider(query));
     final optimizerAsync = ref.watch(cuttingOptimizerProvider(effectiveWorkshopId));
     final availableRemnantsAsync = ref.watch(availableRemnantsProvider(effectiveWorkshopId));
+    final savedCutPlanAsync = ref.watch(savedCutPlanProvider(query));
 
     return Directionality(
       textDirection: TextDirection.rtl,
@@ -103,7 +107,7 @@ class _CutPlanScreenState extends ConsumerState<CutPlanScreen> {
             if (units.isEmpty) {
               return const Center(child: Text('لا توجد وحدات في هذا المشروع'));
             }
-            if (availableRemnantsAsync.isLoading) {
+            if (availableRemnantsAsync.isLoading || savedCutPlanAsync.isLoading) {
               return const Center(child: CircularProgressIndicator());
             }
 
@@ -116,16 +120,94 @@ class _CutPlanScreenState extends ConsumerState<CutPlanScreen> {
             // Build cut pieces from all units
             final allPieces = _buildPieces(units, ref);
 
-            // Run optimizer (remnant-aware) once — or when remnants load
-            _result ??= optimizer.optimize(
-              pieces: allPieces,
-              availableRemnants: availableRemnants.map((r) => r.toRemnantStock()).toList(),
-            );
+            final savedPlan = savedCutPlanAsync.value;
+            if (_result == null) {
+              if (savedPlan != null) {
+                _result = savedPlan.result;
+                _savedAt = savedPlan.generatedAt;
+                _hasUnsavedChanges = false;
+              } else {
+                _result = optimizer.optimize(
+                  pieces: allPieces,
+                  availableRemnants: availableRemnants.map((r) => r.toRemnantStock()).toList(),
+                );
+                _hasUnsavedChanges = true;
+              }
+            }
 
             final result = _result!;
 
             return Column(
               children: [
+                // ── Status Banner for Saved Plan ──────────────────────
+                if (_savedAt != null && !_hasUnsavedChanges)
+                  Container(
+                    margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: AppColors.success.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: AppColors.success.withValues(alpha: 0.4)),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.verified_rounded, color: AppColors.success, size: 20),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'خطة معتمدة ومحفوظة · ${DateFormat('d MMMM yyyy - hh:mm a', 'ar').format(_savedAt!)}',
+                            style: const TextStyle(
+                              color: AppColors.success,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                else if (_savedAt != null && _hasUnsavedChanges)
+                  Container(
+                    margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: AppColors.warning.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: AppColors.warning.withValues(alpha: 0.4)),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.info_outline_rounded, color: AppColors.warning, size: 20),
+                        const SizedBox(width: 8),
+                        const Expanded(
+                          child: Text(
+                            'إعادة حساب تجريبية (لم تُحفظ بعد)',
+                            style: TextStyle(
+                              color: AppColors.warning,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ),
+                        if (savedPlan != null)
+                          TextButton(
+                            style: TextButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(horizontal: 8),
+                              visualDensity: VisualDensity.compact,
+                            ),
+                            onPressed: () {
+                              setState(() {
+                                _result = savedPlan.result;
+                                _savedAt = savedPlan.generatedAt;
+                                _hasUnsavedChanges = false;
+                              });
+                            },
+                            child: const Text('تراجع للسابقة', style: TextStyle(fontSize: 12)),
+                          ),
+                      ],
+                    ),
+                  ),
+
                 // ── Summary Card ──────────────────────────────────────
                 CutSummaryCard(
                   summary: result.summary,
@@ -207,6 +289,7 @@ class _CutPlanScreenState extends ConsumerState<CutPlanScreen> {
         pieces: pieces,
         availableRemnants: externalRemnants.map((r) => r.toRemnantStock()).toList(),
       );
+      _hasUnsavedChanges = true;
     });
   }
 
@@ -234,15 +317,36 @@ class _CutPlanScreenState extends ConsumerState<CutPlanScreen> {
                         width: 16,
                         height: 16,
                         child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                    : const Icon(Icons.save_rounded, size: 18),
-                label: const Text('حفظ الخطة'),
+                    : Icon(
+                        (!_hasUnsavedChanges && _savedAt != null)
+                            ? Icons.check_circle_rounded
+                            : Icons.save_rounded,
+                        size: 18,
+                      ),
+                label: Text(
+                  (!_hasUnsavedChanges && _savedAt != null)
+                      ? 'الخطة معتمدة ومحفوظة ✅'
+                      : (_savedAt != null ? 'تحديث وحفظ الخطة 💾' : 'حفظ الخطة 💾'),
+                ),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.amberPrimary,
+                  backgroundColor: (!_hasUnsavedChanges && _savedAt != null)
+                      ? AppColors.success
+                      : AppColors.amberPrimary,
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(vertical: 14),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 ),
-                onPressed: _isSaving ? null : _savePlan,
+                onPressed: _isSaving
+                    ? null
+                    : (!_hasUnsavedChanges && _savedAt != null)
+                        ? () {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('الخطة معتمدة ومحفوظة مسبقاً. لإعادة الحساب من المخزن الحالي اضغط على زر التحديث 🔄 أعلى البطاقة.'),
+                              ),
+                            );
+                          }
+                        : _savePlan,
               ),
             ),
             const SizedBox(width: 8),
@@ -347,16 +451,19 @@ class _CutPlanScreenState extends ConsumerState<CutPlanScreen> {
     final currentUser = ref.read(currentUserProvider).value;
     if (currentUser == null) return;
 
-    final query = (workshopId: widget.workshopId, projectId: widget.projectId);
+    final effectiveWorkshopId = widget.workshopId.isNotEmpty
+        ? widget.workshopId
+        : (ref.read(activeWorkshopIdProvider) ?? '');
+    final query = (workshopId: effectiveWorkshopId, projectId: widget.projectId);
     final project = ref.read(projectDetailProvider(query)).value;
     if (project == null) return;
 
     setState(() => _isSaving = true);
     try {
       final repo = ref.read(cutPlanRepositoryProvider);
-      final optimizer = ref.read(cuttingOptimizerProvider(widget.workshopId)).value;
+      final optimizer = ref.read(cuttingOptimizerProvider(effectiveWorkshopId)).value;
       final planId = await repo.saveCutPlan(
-        workshopId: widget.workshopId,
+        workshopId: effectiveWorkshopId,
         projectId: widget.projectId,
         projectName: project.name,
         generatedByUid: currentUser.uid,
@@ -375,8 +482,13 @@ class _CutPlanScreenState extends ConsumerState<CutPlanScreen> {
             backgroundColor: AppColors.success,
           ),
         );
-        // Invalidate remnants so stock screen refreshes
-        ref.invalidate(availableRemnantsProvider(widget.workshopId));
+        // Invalidate remnants and saved plan so stock & plan screens refresh
+        ref.invalidate(availableRemnantsProvider(effectiveWorkshopId));
+        ref.invalidate(savedCutPlanProvider(query));
+        setState(() {
+          _hasUnsavedChanges = false;
+          _savedAt = DateTime.now();
+        });
         debugPrint('Cut plan saved: $planId');
 
         // Optional background upload of PDF to Firebase Storage
