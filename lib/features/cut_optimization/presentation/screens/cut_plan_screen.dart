@@ -8,7 +8,9 @@ import 'package:maqyas_engine/maqyas_engine.dart';
 import 'package:printing/printing.dart';
 import '../../../../app/theme/app_colors.dart';
 import '../../../auth/presentation/controllers/auth_controller.dart';
+import '../../../projects/domain/models/project.dart';
 import '../../../projects/domain/models/project_unit.dart';
+import '../../../projects/data/projects_repository.dart';
 import '../../../projects/presentation/screens/project_detail_screen.dart';
 import '../../../reports/data/label_generator.dart';
 import '../../../reports/data/pdf_generator.dart';
@@ -211,7 +213,16 @@ class _CutPlanScreenState extends ConsumerState<CutPlanScreen> {
                             ),
                             icon: const Icon(Icons.refresh_rounded, size: 16),
                             label: const Text('إعادة حساب الخطة لتشمل الإضافات', style: TextStyle(fontSize: 12)),
-                            onPressed: () => _regenerate(optimizer, allPieces, availableRemnants),
+                            onPressed: () => _confirmRecalculate(
+                              context: context,
+                              project: projectAsync.value,
+                              units: unitsAsync.value ?? [],
+                              savedPlan: savedCutPlanAsync.value!,
+                              optimizer: optimizer,
+                              allPieces: allPieces,
+                              availableRemnants: availableRemnants,
+                              effectiveWorkshopId: effectiveWorkshopId,
+                            ),
                           ),
                         ),
                       ],
@@ -603,6 +614,248 @@ class _CutPlanScreenState extends ConsumerState<CutPlanScreen> {
       }
     } finally {
       if (mounted) setState(() => _isSaving = false);
+    }
+  }
+
+  Future<void> _confirmRecalculate({
+    required BuildContext context,
+    required Project? project,
+    required List<ProjectUnit> units,
+    required SavedCutPlan savedPlan,
+    required CutOptimizer optimizer,
+    required List<CutPiece> allPieces,
+    required List<RemnantDoc> availableRemnants,
+    required String effectiveWorkshopId,
+  }) async {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        return Container(
+          decoration: BoxDecoration(
+            color: isDark ? AppColors.darkSurface : Colors.white,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
+            left: 20,
+            right: 20,
+            top: 16,
+          ),
+          child: SafeArea(
+            top: false,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Center(
+                  child: Container(
+                    width: 44,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: isDark ? AppColors.slate700 : AppColors.slate300,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 18),
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: AppColors.warning.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(Icons.handyman_rounded, color: AppColors.warning, size: 24),
+                    ),
+                    const SizedBox(width: 12),
+                    const Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'إرشاد مهني: هل قُصت النوافذ السابقة بالفعل؟',
+                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                          ),
+                          Text(
+                            'تطبيق المنطق الصناعي السليم في ورشة الألمنيوم',
+                            style: TextStyle(fontSize: 12, color: AppColors.slate400),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  'الواقع في الورشة: لا يمكنك فيزيائياً خلط القديم بالجديد إذا كان عامل المنشار قد قص النوافذ القديمة، لأنها أصبحت قطعاً مقصوصة ومنتهية وفضلتها قد تكون استُهلكت بالفعل في مشروع آخر! إعادة الحساب الشامل ستدمج قطعاً من القديم والجديد في قضبان خام مشتركة، وهذا مستحيل تنفيذه.',
+                  style: TextStyle(fontSize: 13, color: isDark ? AppColors.slate300 : AppColors.slate600, height: 1.45),
+                ),
+                const SizedBox(height: 18),
+
+                // Option 1: Move new unit(s) to Batch 2 (Recommended if cut)
+                InkWell(
+                  onTap: () async {
+                    Navigator.pop(ctx);
+                    await _splitToBatchProject(
+                      context: context,
+                      project: project,
+                      units: units,
+                      savedPlan: savedPlan,
+                      workshopId: effectiveWorkshopId,
+                    );
+                  },
+                  borderRadius: BorderRadius.circular(16),
+                  child: Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: AppColors.amberPrimary.withValues(alpha: 0.08),
+                      border: Border.all(color: AppColors.amberPrimary.withValues(alpha: 0.5), width: 1.5),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.inventory_2_outlined, color: AppColors.amberPrimary, size: 28),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  const Text(
+                                    'نعم، قُصت بالفعل (فصل كدفعة ثانية)',
+                                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: AppColors.amberPrimary,
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: const Text('موصى به بالورشة', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                'نقل النوافذ الجديدة إلى مشروع ملحق باسم «${project?.name ?? "المشروع"} (دفعة 2)» لحساب خطة مستقلة تسحب من المخزن والفضلات الحالية، مع بقاء ما تم قصه محفوظاً وسليماً دون تغيير.',
+                                style: TextStyle(fontSize: 12, color: isDark ? AppColors.slate300 : AppColors.slate600, height: 1.35),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: AppColors.amberPrimary),
+                      ],
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 12),
+
+                // Option 2: Full recalculation (if not cut yet)
+                InkWell(
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _regenerate(optimizer, allPieces, availableRemnants);
+                  },
+                  borderRadius: BorderRadius.circular(16),
+                  child: Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: isDark ? AppColors.slate700.withValues(alpha: 0.3) : AppColors.slate100,
+                      border: Border.all(color: AppColors.slate300.withValues(alpha: 0.5)),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.refresh_rounded, color: AppColors.slate400, size: 28),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'لا، لم تُقص بعد في الورشة (كانت مجرد خطة)',
+                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                'إذا كان المشروع بأكمله لم يُقص بعد في الواقع، فسيتم خلط كافة القطع وإعادة الحساب الشامل لتحقيق أعلى نسبة توفير للألمنيوم.',
+                                style: TextStyle(fontSize: 12, color: isDark ? AppColors.slate400 : AppColors.slate500, height: 1.35),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: AppColors.slate400),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _splitToBatchProject({
+    required BuildContext context,
+    required Project? project,
+    required List<ProjectUnit> units,
+    required SavedCutPlan savedPlan,
+    required String workshopId,
+  }) async {
+    if (project == null) return;
+
+    // Identify newly added units (created after saved plan was generated)
+    final newUnits = units.where((u) => u.createdAt.isAfter(savedPlan.generatedAt)).toList();
+    final unitsToMove = newUnits.isNotEmpty ? newUnits : [units.last];
+
+    final repo = ref.read(projectsRepositoryProvider);
+
+    // Create the batch project
+    final batchProject = Project(
+      id: '',
+      workshopId: workshopId,
+      name: '${project.name} (دفعة 2)',
+      clientName: project.clientName,
+      clientPhone: project.clientPhone,
+      location: project.location,
+      status: 'in_progress',
+      unitCount: 0,
+      createdAt: DateTime.now(),
+      updatedAt: DateTime.now(),
+    );
+
+    final newProjectId = await repo.createProject(batchProject);
+
+    // Move units to the new project
+    for (final unit in unitsToMove) {
+      final unitForBatch = unit.copyWith(
+        id: '',
+        projectId: newProjectId,
+        createdAt: DateTime.now(),
+        updatedAt: DateTime.now(),
+      );
+      await repo.saveUnit(workshopId, unitForBatch);
+      await repo.deleteUnit(workshopId, widget.projectId, unit.id);
+    }
+
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('تم إنشاء «${batchProject.name}» ونقل ${unitsToMove.length} وحدة إليها بنجاح ✅'),
+          backgroundColor: AppColors.success,
+        ),
+      );
+      context.push('/dashboard/owner/projects/$newProjectId/cut-plan?workshopId=$workshopId');
     }
   }
 }

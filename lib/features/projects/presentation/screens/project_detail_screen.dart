@@ -8,6 +8,7 @@ import '../../../../features/rules/data/rules_repository.dart';
 import '../../data/projects_repository.dart';
 import '../../domain/models/project.dart';
 import '../../domain/models/project_unit.dart';
+import 'package:meqyas/features/cut_optimization/data/cut_plan_repository.dart';
 import '../widgets/bar_layout_view.dart';
 import '../widgets/cutting_list_view.dart';
 import 'quick_entry_sheet.dart';
@@ -68,6 +69,7 @@ class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> with 
     final query = (workshopId: workshopId, projectId: widget.projectId);
     final projectAsync = ref.watch(projectDetailProvider(query));
     final unitsAsync = ref.watch(projectUnitsProvider(query));
+    final savedCutPlanAsync = ref.watch(savedCutPlanProvider(query));
 
     return Scaffold(
       appBar: AppBar(
@@ -81,13 +83,21 @@ class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> with 
             tooltip: 'إدخال سريع للقياسات',
             icon: const Icon(Icons.flash_on_rounded, color: AppColors.amberPrimary),
             onPressed: () {
-              showModalBottomSheet(
-                context: context,
-                isScrollControlled: true,
-                builder: (_) => QuickEntrySheet(
-                  projectId: widget.projectId,
-                  workshopId: workshopId,
-                ),
+              _onAddUnitRequested(
+                context,
+                workshopId,
+                projectAsync.value,
+                savedCutPlanAsync.value,
+                onContinueSameProject: () {
+                  showModalBottomSheet(
+                    context: context,
+                    isScrollControlled: true,
+                    builder: (_) => QuickEntrySheet(
+                      projectId: widget.projectId,
+                      workshopId: workshopId,
+                    ),
+                  );
+                },
               );
             },
           ),
@@ -95,7 +105,12 @@ class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> with 
             tooltip: 'إضافة عنصر بتصميم هندسي كامل',
             icon: const Icon(Icons.add_rounded),
             onPressed: () {
-              context.push('/dashboard/owner/projects/${widget.projectId}/units/new?workshopId=$workshopId');
+              _onAddUnitRequested(
+                context,
+                workshopId,
+                projectAsync.value,
+                savedCutPlanAsync.value,
+              );
             },
           ),
           IconButton(
@@ -149,7 +164,14 @@ class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> with 
           return TabBarView(
             controller: _tabController,
             children: [
-              _buildUnitsListTab(context, units, workshopId, isDark),
+              _buildUnitsListTab(
+                context,
+                units,
+                workshopId,
+                isDark,
+                projectAsync.value,
+                savedCutPlanAsync.value,
+              ),
               _buildProjectCuttingTab(context, units, workshopId),
               _buildProjectBarsTab(context, units, workshopId),
             ],
@@ -166,6 +188,8 @@ class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> with 
     List<ProjectUnit> units,
     String workshopId,
     bool isDark,
+    Project? project,
+    SavedCutPlan? savedPlan,
   ) {
     final theme = Theme.of(context);
 
@@ -193,13 +217,21 @@ class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> with 
                     icon: const Icon(Icons.flash_on_rounded, size: 18),
                     label: const Text('إدخال سريع'),
                     onPressed: () {
-                      showModalBottomSheet(
-                        context: context,
-                        isScrollControlled: true,
-                        builder: (_) => QuickEntrySheet(
-                          projectId: widget.projectId,
-                          workshopId: workshopId,
-                        ),
+                      _onAddUnitRequested(
+                        context,
+                        workshopId,
+                        project,
+                        savedPlan,
+                        onContinueSameProject: () {
+                          showModalBottomSheet(
+                            context: context,
+                            isScrollControlled: true,
+                            builder: (_) => QuickEntrySheet(
+                              projectId: widget.projectId,
+                              workshopId: workshopId,
+                            ),
+                          );
+                        },
                       );
                     },
                   ),
@@ -208,7 +240,12 @@ class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> with 
                     icon: const Icon(Icons.architecture_rounded, size: 18),
                     label: const Text('استوديو التصميم 2D'),
                     onPressed: () {
-                      context.push('/dashboard/owner/projects/${widget.projectId}/units/new?workshopId=$workshopId');
+                      _onAddUnitRequested(
+                        context,
+                        workshopId,
+                        project,
+                        savedPlan,
+                      );
                     },
                   ),
                 ],
@@ -490,6 +527,215 @@ class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> with 
         }
       }
     }
+  }
+
+  Future<void> _onAddUnitRequested(
+    BuildContext context,
+    String workshopId,
+    Project? project,
+    SavedCutPlan? savedPlan, {
+    VoidCallback? onContinueSameProject,
+  }) async {
+    if (savedPlan == null || project == null) {
+      if (onContinueSameProject != null) {
+        onContinueSameProject();
+      } else {
+        context.push('/dashboard/owner/projects/${widget.projectId}/units/new?workshopId=$workshopId');
+      }
+      return;
+    }
+
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        return Directionality(
+          textDirection: TextDirection.rtl,
+          child: Container(
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: isDark ? AppColors.darkCard : Colors.white,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+            ),
+            child: SafeArea(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: AppColors.warning.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Icon(Icons.handyman_rounded, color: AppColors.warning, size: 24),
+                      ),
+                      const SizedBox(width: 12),
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'إرشاد مهني: خطة القص معتمدة ومحفوظة',
+                              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                            ),
+                            Text(
+                              'هل قام عامل المنشار بقص النوافذ السابقة بالفعل؟',
+                              style: TextStyle(fontSize: 12, color: AppColors.slate400),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 18),
+
+                  // Option A: Batch 2 (Recommended if cut)
+                  InkWell(
+                    onTap: () async {
+                      Navigator.pop(ctx);
+                      final newProjectId = await _createBatchProject(context, ref, project, workshopId);
+                      if (context.mounted) {
+                        context.push('/dashboard/owner/projects/$newProjectId/units/new?workshopId=$workshopId');
+                      }
+                    },
+                    borderRadius: BorderRadius.circular(16),
+                    child: Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: AppColors.amberPrimary.withValues(alpha: 0.08),
+                        border: Border.all(color: AppColors.amberPrimary.withValues(alpha: 0.4)),
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.inventory_2_outlined, color: AppColors.amberPrimary, size: 28),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    const Text(
+                                      'نعم، قُصت بالفعل (المنطق الصناعي السليم)',
+                                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: AppColors.amberPrimary,
+                                        borderRadius: BorderRadius.circular(4),
+                                      ),
+                                      child: const Text('موصى به', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  'لا يمكن فيزيائياً خلط القديم بالجديد؛ لأن النوافذ القديمة أصبحت مقصوصة وفضلتها قد تكون استُهلكت. سيتم إنشاء ملحق باسم «${project.name} (دفعة 2)» لحساب خطة مستقلة للنافذة الجديدة دون المساس بما تم قصه.',
+                                  style: TextStyle(fontSize: 12, color: isDark ? AppColors.slate300 : AppColors.slate600, height: 1.4),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: AppColors.amberPrimary),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  // Option B: Continue in same project (if not cut yet)
+                  InkWell(
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      if (onContinueSameProject != null) {
+                        onContinueSameProject();
+                      } else {
+                        context.push('/dashboard/owner/projects/${widget.projectId}/units/new?workshopId=$workshopId');
+                      }
+                    },
+                    borderRadius: BorderRadius.circular(16),
+                    child: Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: isDark ? AppColors.slate700.withValues(alpha: 0.3) : AppColors.slate100,
+                        border: Border.all(color: AppColors.slate300.withValues(alpha: 0.5)),
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.edit_note_rounded, color: AppColors.slate400, size: 28),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  'لا، لم تُقص بعد في الورشة (كانت مجرد خطة)',
+                                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  'إذا كان المشروع بأكمله لم يُقص بعد على أرض الواقع، يمكنك إضافة النافذة هنا لنفس المشروع، مع إمكانية إعادة الحساب الكامل لاحقاً للحصول على أعلى نسبة توفير.',
+                                  style: TextStyle(fontSize: 12, color: isDark ? AppColors.slate400 : AppColors.slate500, height: 1.4),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: AppColors.slate400),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 8),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<String> _createBatchProject(
+    BuildContext context,
+    WidgetRef ref,
+    Project parentProject,
+    String workshopId,
+  ) async {
+    final batchProject = Project(
+      id: '',
+      workshopId: workshopId,
+      name: '${parentProject.name} (دفعة 2)',
+      clientName: parentProject.clientName,
+      clientPhone: parentProject.clientPhone,
+      location: parentProject.location,
+      status: 'in_progress',
+      unitCount: 0,
+      createdAt: DateTime.now(),
+      updatedAt: DateTime.now(),
+    );
+    final repo = ref.read(projectsRepositoryProvider);
+    final newId = await repo.createProject(batchProject);
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('تم إنشاء المشروع الملحق: ${batchProject.name} بنجاح ✅'),
+          backgroundColor: AppColors.success,
+        ),
+      );
+    }
+    return newId;
   }
 }
 
