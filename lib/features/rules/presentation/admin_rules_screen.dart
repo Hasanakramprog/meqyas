@@ -82,37 +82,62 @@ class _AdminRulesScreenState extends ConsumerState<AdminRulesScreen>
           padding: const EdgeInsets.all(20),
           children: [
             // Top action bar
-            Row(
-              children: [
-                Expanded(
-                  child: SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: Row(
-                      children: [
-                        _buildFilterChip('الكل (${allRules.length})', 'all'),
-                        const SizedBox(width: 8),
-                        _buildFilterChip('معتمدة (${allRules.where((r) => r.isApproved).length})', 'approved'),
-                        const SizedBox(width: 8),
-                        _buildFilterChip('مسودات (${allRules.where((r) => r.isDraft).length})', 'draft'),
-                        const SizedBox(width: 8),
-                        _buildFilterChip('مؤرشفة (${allRules.where((r) => r.isArchived).length})', 'archived'),
-                      ],
-                    ),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final isCompact = constraints.maxWidth < 700;
+
+                final filterChips = SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      _buildFilterChip('الكل (${allRules.length})', 'all'),
+                      const SizedBox(width: 8),
+                      _buildFilterChip('معتمدة (${allRules.where((r) => r.isApproved).length})', 'approved'),
+                      const SizedBox(width: 8),
+                      _buildFilterChip('مسودات (${allRules.where((r) => r.isDraft).length})', 'draft'),
+                      const SizedBox(width: 8),
+                      _buildFilterChip('مؤرشفة (${allRules.where((r) => r.isArchived).length})', 'archived'),
+                    ],
                   ),
-                ),
-                const SizedBox(width: 12),
-                OutlinedButton.icon(
-                  icon: const Icon(Icons.verified_user_outlined, size: 16),
-                  label: const Text('فحص التعارضات'),
-                  onPressed: () => _runConflictCheck(context, allRules),
-                ),
-                const SizedBox(width: 8),
-                ElevatedButton.icon(
-                  icon: const Icon(Icons.add_rounded, size: 16),
-                  label: const Text('إضافة مسودة قاعدة'),
-                  onPressed: () => _openRuleEditorDialog(context, null),
-                ),
-              ],
+                );
+
+                final actionButtons = Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    OutlinedButton.icon(
+                      icon: const Icon(Icons.verified_user_outlined, size: 16),
+                      label: const Text('فحص التعارضات'),
+                      onPressed: () => _runConflictCheck(context, allRules),
+                    ),
+                    ElevatedButton.icon(
+                      icon: const Icon(Icons.add_rounded, size: 16),
+                      label: const Text('إضافة مسودة قاعدة'),
+                      onPressed: () => _openRuleEditorDialog(context, null),
+                    ),
+                  ],
+                );
+
+                if (isCompact) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      filterChips,
+                      const SizedBox(height: 12),
+                      actionButtons,
+                    ],
+                  );
+                }
+
+                return Row(
+                  children: [
+                    Expanded(child: filterChips),
+                    const SizedBox(width: 12),
+                    actionButtons,
+                  ],
+                );
+              },
             ),
             const SizedBox(height: 16),
 
@@ -180,15 +205,18 @@ class _AdminRulesScreenState extends ConsumerState<AdminRulesScreen>
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(
-                  child: Row(
+                  child: Wrap(
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    spacing: 8,
+                    runSpacing: 4,
                     children: [
                       Text(
                         rule.nameArabic.isNotEmpty ? rule.nameArabic : rule.itemCode,
                         style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
                       ),
-                      const SizedBox(width: 8),
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                         decoration: BoxDecoration(
@@ -200,7 +228,6 @@ class _AdminRulesScreenState extends ConsumerState<AdminRulesScreen>
                           style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, fontFamily: 'monospace'),
                         ),
                       ),
-                      const SizedBox(width: 8),
                       Text(
                         '(${rule.profileSystemId})',
                         style: const TextStyle(fontSize: 11, color: AppColors.slate400),
@@ -208,6 +235,7 @@ class _AdminRulesScreenState extends ConsumerState<AdminRulesScreen>
                     ],
                   ),
                 ),
+                const SizedBox(width: 8),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                   decoration: BoxDecoration(
@@ -257,8 +285,11 @@ class _AdminRulesScreenState extends ConsumerState<AdminRulesScreen>
               ),
             ),
             const SizedBox(height: 12),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
+            Wrap(
+              alignment: WrapAlignment.end,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: 8,
+              runSpacing: 8,
               children: [
                 if (rule.isDraft) ...[
                   TextButton.icon(
