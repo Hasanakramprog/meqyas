@@ -66,5 +66,7 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>NSCameraUsageDescription</key>
+	<string>يحتاج تطبيق مقياس إلى إذن الكاميرا لمسح رموز QR لملصقات قطع الألمنيوم المقصوصة في الورشة.</string>
 </dict>
 </plist>

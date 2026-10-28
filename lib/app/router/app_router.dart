@@ -20,6 +20,7 @@ import '../../features/rules/presentation/admin_rules_screen.dart';
 import '../../features/rules/presentation/workshop_rules_screen.dart';
 import '../../features/cut_optimization/presentation/screens/cut_plan_screen.dart';
 import '../../features/cut_optimization/presentation/screens/remnants_screen.dart';
+import '../../features/cut_scanner/presentation/screens/qr_piece_scanner_screen.dart';
 
 class RouterNotifier extends ChangeNotifier {
   final Ref _ref;
@@ -219,7 +220,17 @@ final appRouterProvider = Provider<GoRouter>((ref) {
               return RemnantsScreen(workshopId: workshopId);
             },
           ),
+          GoRoute(
+            path: 'scanner',
+            name: 'qr_scanner',
+            builder: (context, state) => const QrPieceScannerScreen(),
+          ),
         ],
+      ),
+      GoRoute(
+        path: '/scanner',
+        name: 'quick_scanner',
+        builder: (context, state) => const QrPieceScannerScreen(),
       ),
       GoRoute(
         path: '/dashboard/supplier',

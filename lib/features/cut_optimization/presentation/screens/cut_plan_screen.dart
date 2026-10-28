@@ -94,6 +94,11 @@ class _CutPlanScreenState extends ConsumerState<CutPlanScreen> {
               onPressed: (_result == null || _isExportingLabels) ? null : _exportLabels,
             ),
             IconButton(
+              icon: const Icon(Icons.qr_code_scanner_rounded, color: AppColors.amberPrimary),
+              tooltip: 'ماسح قطع الألمنيوم QR',
+              onPressed: () => context.push('/scanner'),
+            ),
+            IconButton(
               icon: const Icon(Icons.layers_rounded),
               tooltip: 'مخزن الفضلات',
               onPressed: () => context.push(

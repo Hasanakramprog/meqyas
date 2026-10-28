@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import '../../../../app/theme/app_colors.dart';
 import '../../data/cut_plan_repository.dart';
@@ -40,6 +41,11 @@ class _RemnantsScreenState extends ConsumerState<RemnantsScreen> {
               isDark ? AppColors.darkSurface : AppColors.lightSurface,
           elevation: 0,
           actions: [
+            IconButton(
+              icon: const Icon(Icons.qr_code_scanner_rounded, color: AppColors.amberPrimary),
+              tooltip: 'ماسح قطع الألمنيوم QR',
+              onPressed: () => context.push('/scanner'),
+            ),
             // Toggle available only
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),

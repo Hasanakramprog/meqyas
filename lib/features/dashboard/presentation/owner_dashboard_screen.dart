@@ -103,6 +103,14 @@ class _OwnerDashboardScreenState extends ConsumerState<OwnerDashboardScreen> {
             onPressed: () => _showNewWorkshopDialog(context),
           ),
           IconButton(
+            tooltip: 'ماسح قطع الألمنيوم QR',
+            icon: const Icon(
+              Icons.qr_code_scanner_rounded,
+              color: AppColors.amberPrimary,
+            ),
+            onPressed: () => context.push('/scanner'),
+          ),
+          IconButton(
             tooltip: 'إعدادات المنشار والقواعد',
             icon: const Icon(Icons.tune_rounded, color: AppColors.amberPrimary),
             onPressed: () {

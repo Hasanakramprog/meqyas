@@ -85,11 +85,14 @@ class QrLabelPdfGenerator {
     String projectId,
   ) {
     final qrData = jsonEncode({
+      'v': 1,
       'p': projectId,
       'u': item.cut.unitTag ?? '',
       'i': item.itemCode,
+      'n': item.cut.nameArabic,
       'l': item.cut.lengthCm,
       'b': item.barNumber,
+      'r': item.isFromRemnant,
     });
 
     return pw.Container(
