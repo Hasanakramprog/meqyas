@@ -119,6 +119,7 @@ export const createSupplierUser = onCall(async (request) => {
     email,
     password,
     displayName: name,
+    emailVerified: true,
   });
 
   const supplierRef = db.collection("suppliers").doc();
@@ -355,4 +356,444 @@ export const onProjectDeleted = onDocumentDeleted(
     await batch.commit();
   }
 );
+
+/**
+ * Confirms an order and atomically deducts stock (Phase 6 Core DoD).
+ * - Authorized for the order's assigned supplier or an admin.
+ * - Idempotent: calling again with the same idempotencyKey returns success without double-deducting.
+ * - Aggregates quantities by itemId so duplicate lines never overwrite each other.
+ * - Enforces Firestore transaction limits (max 150 unique items).
+ * - All-or-nothing: if any item has insufficient balance, aborts completely and changes nothing.
+ */
+export const confirmOrder = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Authentication required");
+  }
+
+  const callerUid = request.auth.uid;
+  const callerRole = request.auth.token.role;
+  const callerSupplierId = request.auth.token.supplierId;
+
+  const { orderId, idempotencyKey } = request.data || {};
+  if (!orderId || typeof orderId !== "string" || !idempotencyKey || typeof idempotencyKey !== "string") {
+    throw new HttpsError("invalid-argument", "Missing or invalid orderId or idempotencyKey");
+  }
+
+  const orderRef = db.collection("orders").doc(orderId);
+
+  return await db.runTransaction(async (transaction) => {
+    const orderDoc = await transaction.get(orderRef);
+    if (!orderDoc.exists) {
+      throw new HttpsError("not-found", "الطلب غير موجود");
+    }
+
+    const order = orderDoc.data()!;
+    const supplierId = order.supplierId as string;
+
+    // 1. Pluggable authorization check: assigned supplier or admin
+    const isAuthorized =
+      callerRole === "admin" ||
+      (callerRole === "supplier" && callerSupplierId === supplierId);
+    if (!isAuthorized) {
+      throw new HttpsError(
+        "permission-denied",
+        "فقط المورد المعني أو الإدارة يمكنهم تأكيد الطلب وخصم المخزون"
+      );
+    }
+
+    // 2. Idempotency check: already confirmed with the same idempotencyKey?
+    if (order.status === "confirmed" && order.idempotencyKey === idempotencyKey) {
+      return {
+        success: true,
+        alreadyConfirmed: true,
+        orderId,
+      };
+    }
+
+    if (order.status === "confirmed") {
+      throw new HttpsError("already-exists", "تم تأكيد هذا الطلب مسبقاً");
+    }
+
+    if (order.status !== "sent" && order.status !== "draft") {
+      throw new HttpsError(
+        "failed-precondition",
+        `لا يمكن تأكيد الطلب في حالته الحالية (${order.status})`
+      );
+    }
+
+    const rawItems = (order.items || []) as Array<{
+      itemId: string;
+      nameArabic?: string;
+      name?: string;
+      qty: number;
+      unit: string;
+    }>;
+
+    if (rawItems.length === 0) {
+      throw new HttpsError("invalid-argument", "الطلب لا يحتوي على أي أصناف");
+    }
+
+    // 3. Aggregate quantities by itemId to prevent duplicate line overwrite bugs
+    const aggregatedMap = new Map<
+      string,
+      { itemId: string; nameArabic: string; qty: number; unit: string }
+    >();
+
+    for (const item of rawItems) {
+      if (!item.itemId || typeof item.qty !== "number" || item.qty <= 0) {
+        throw new HttpsError(
+          "invalid-argument",
+          `بيانات صنف غير صالحة في الطلب (${item.nameArabic || item.itemId})`
+        );
+      }
+      const existing = aggregatedMap.get(item.itemId);
+      if (existing) {
+        existing.qty += item.qty;
+      } else {
+        aggregatedMap.set(item.itemId, {
+          itemId: item.itemId,
+          nameArabic: item.nameArabic || item.name || item.itemId,
+          qty: item.qty,
+          unit: item.unit || "piece",
+        });
+      }
+    }
+
+    const aggregatedItems = Array.from(aggregatedMap.values());
+
+    // Respect Firestore 500-operation transaction limit (1 read + 2 writes per item + 2 order/audit ops)
+    if (aggregatedItems.length > 150) {
+      throw new HttpsError(
+        "invalid-argument",
+        "الطلب يتجاوز الحد الأقصى للأصناف في العملية الواحدة (150 صنفاً). يرجى تجزئة الطلب."
+      );
+    }
+
+    // 4. Pre-read all stock documents inside transaction
+    const stockRefs = aggregatedItems.map((item) =>
+      db.doc(`suppliers/${supplierId}/stock/${item.itemId}`)
+    );
+    const stockDocs = await Promise.all(
+      stockRefs.map((ref) => transaction.get(ref))
+    );
+
+    // 5. All-or-nothing atomic verification: abort if any item would go negative
+    for (let i = 0; i < aggregatedItems.length; i++) {
+      const item = aggregatedItems[i];
+      const stockDoc = stockDocs[i];
+      const currentBalance = stockDoc.exists
+        ? Number(stockDoc.data()?.balance ?? 0)
+        : 0;
+
+      if (currentBalance < item.qty) {
+        throw new HttpsError(
+          "failed-precondition",
+          `الرصيد غير كافٍ للصنف «${item.nameArabic}». المتوفر: ${currentBalance}، المطلوب: ${item.qty} — لم يتم الخصم`
+        );
+      }
+    }
+
+    // 6. Deduct stock & create inventoryMovements records
+    const now = FieldValue.serverTimestamp();
+    const nowIso = new Date().toISOString();
+
+    for (let i = 0; i < aggregatedItems.length; i++) {
+      const item = aggregatedItems[i];
+      const stockRef = stockRefs[i];
+      const currentBalance = Number(stockDocs[i].data()?.balance ?? 0);
+      const newBalance = currentBalance - item.qty;
+
+      transaction.set(
+        stockRef,
+        {
+          itemId: item.itemId,
+          supplierId,
+          balance: newBalance,
+          unit: item.unit,
+          updatedAt: now,
+        },
+        { merge: true }
+      );
+
+      const movementRef = db.collection("inventoryMovements").doc();
+      transaction.set(movementRef, {
+        movementId: movementRef.id,
+        itemId: item.itemId,
+        nameArabic: item.nameArabic,
+        supplierId,
+        qty: item.qty,
+        balanceBefore: currentBalance,
+        balanceAfter: newBalance,
+        unit: item.unit,
+        movementType: "deduction",
+        orderId,
+        idempotencyKey,
+        actorUid: callerUid,
+        createdAt: now,
+      });
+    }
+
+    // 7. Update order status and append statusHistory
+    const statusHistory = Array.isArray(order.statusHistory)
+      ? [...order.statusHistory]
+      : [];
+    statusHistory.push({
+      status: "confirmed",
+      changedBy: callerUid,
+      changedAt: nowIso,
+      note: "تم تأكيد الطلب وخصم الكميات من المخزون بنجاح",
+    });
+
+    transaction.update(orderRef, {
+      status: "confirmed",
+      confirmedBy: callerUid,
+      confirmedAt: now,
+      idempotencyKey,
+      statusHistory,
+      updatedAt: now,
+    });
+
+    // 8. Write audit log
+    const auditRef = db.collection("auditLogs").doc();
+    transaction.set(auditRef, {
+      action: "order_confirmed",
+      entityType: "order",
+      entityId: orderId,
+      orderId,
+      supplierId,
+      workshopId: order.workshopId || "",
+      actorUid: callerUid,
+      idempotencyKey,
+      itemsCount: aggregatedItems.length,
+      at: now,
+    });
+
+    return {
+      success: true,
+      alreadyConfirmed: false,
+      orderId,
+    };
+  });
+});
+
+/**
+ * Restocks or adjusts a supplier's inventory balance server-side.
+ * Rejects any adjustment that would result in a negative balance.
+ */
+export const adjustStock = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Authentication required");
+  }
+
+  const callerUid = request.auth.uid;
+  const callerRole = request.auth.token.role;
+  const callerSupplierId = request.auth.token.supplierId;
+
+  const { supplierId, itemId, nameArabic, qty, unit, movementType, reason } =
+    request.data || {};
+
+  if (!supplierId || !itemId || typeof qty !== "number" || qty === 0) {
+    throw new HttpsError(
+      "invalid-argument",
+      "بيانات تعديل المخزون غير مكتملة أو الكمية تساوي صفراً"
+    );
+  }
+
+  const isAuthorized =
+    callerRole === "admin" ||
+    (callerRole === "supplier" && callerSupplierId === supplierId);
+  if (!isAuthorized) {
+    throw new HttpsError(
+      "permission-denied",
+      "غير مصرح لك بتعديل مخزون هذا المورد"
+    );
+  }
+
+  const stockRef = db.doc(`suppliers/${supplierId}/stock/${itemId}`);
+  const now = FieldValue.serverTimestamp();
+
+  return await db.runTransaction(async (transaction) => {
+    const stockDoc = await transaction.get(stockRef);
+    const currentBalance = stockDoc.exists
+      ? Number(stockDoc.data()?.balance ?? 0)
+      : 0;
+    const effectiveType =
+      movementType === "adjustment" ? "adjustment" : "restock";
+    const delta = effectiveType === "restock" ? Math.abs(qty) : qty;
+    const newBalance = currentBalance + delta;
+
+    if (newBalance < 0) {
+      throw new HttpsError(
+        "failed-precondition",
+        `لا يمكن أن يصبح رصيد المخزون سالباً (الرصيد الحالي: ${currentBalance})`
+      );
+    }
+
+    transaction.set(
+      stockRef,
+      {
+        itemId,
+        nameArabic: nameArabic || stockDoc.data()?.nameArabic || itemId,
+        supplierId,
+        balance: newBalance,
+        unit: unit || stockDoc.data()?.unit || "piece",
+        reservedQty: stockDoc.exists
+          ? Number(stockDoc.data()?.reservedQty ?? 0)
+          : 0,
+        updatedAt: now,
+      },
+      { merge: true }
+    );
+
+    const movementRef = db.collection("inventoryMovements").doc();
+    transaction.set(movementRef, {
+      movementId: movementRef.id,
+      itemId,
+      nameArabic: nameArabic || itemId,
+      supplierId,
+      qty: delta,
+      balanceBefore: currentBalance,
+      balanceAfter: newBalance,
+      unit: unit || "piece",
+      movementType: effectiveType,
+      reason: reason || "",
+      actorUid: callerUid,
+      createdAt: now,
+    });
+
+    const auditRef = db.collection("auditLogs").doc();
+    transaction.set(auditRef, {
+      action: `stock_${effectiveType}`,
+      entityType: "stock",
+      entityId: `${supplierId}:${itemId}`,
+      supplierId,
+      itemId,
+      before: { balance: currentBalance },
+      after: { balance: newBalance },
+      actorUid: callerUid,
+      at: now,
+    });
+
+    return {
+      success: true,
+      itemId,
+      balanceBefore: currentBalance,
+      balanceAfter: newBalance,
+    };
+  });
+});
+
+/**
+ * Transitions order status after confirmation using a strict transition table (Spec §11).
+ */
+export const updateOrderStatus = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Authentication required");
+  }
+
+  const callerUid = request.auth.uid;
+  const callerRole = request.auth.token.role;
+  const callerSupplierId = request.auth.token.supplierId;
+  const callerWorkshopId = request.auth.token.workshopId;
+
+  const { orderId, newStatus, note } = request.data || {};
+  if (!orderId || !newStatus) {
+    throw new HttpsError("invalid-argument", "Missing orderId or newStatus");
+  }
+
+  if (newStatus === "confirmed") {
+    throw new HttpsError(
+      "invalid-argument",
+      "يجب استخدام دالة confirmOrder لتأكيد الطلب وخصم المخزون"
+    );
+  }
+
+  const allowedTransitions: Record<string, string[]> = {
+    draft: ["sent", "cancelled"],
+    sent: ["cancelled"],
+    confirmed: ["preparing", "completed", "cancelled"],
+    preparing: ["completed", "cancelled"],
+    completed: [],
+    cancelled: [],
+  };
+
+  const orderRef = db.collection("orders").doc(orderId);
+  const now = FieldValue.serverTimestamp();
+  const nowIso = new Date().toISOString();
+
+  return await db.runTransaction(async (transaction) => {
+    const orderDoc = await transaction.get(orderRef);
+    if (!orderDoc.exists) {
+      throw new HttpsError("not-found", "الطلب غير موجود");
+    }
+
+    const order = orderDoc.data()!;
+    const currentStatus = order.status as string;
+
+    const isSupplierOrAdmin =
+      callerRole === "admin" ||
+      (callerRole === "supplier" && callerSupplierId === order.supplierId);
+    const isOwner =
+      callerRole === "owner" && callerWorkshopId === order.workshopId;
+
+    if (!isSupplierOrAdmin && !isOwner) {
+      throw new HttpsError("permission-denied", "غير مصرح لك بتحديث هذا الطلب");
+    }
+
+    // Owner can only transition draft -> sent or draft/sent -> cancelled
+    if (isOwner && !isSupplierOrAdmin) {
+      if (
+        !(
+          (currentStatus === "draft" &&
+            (newStatus === "sent" || newStatus === "cancelled")) ||
+          (currentStatus === "sent" && newStatus === "cancelled")
+        )
+      ) {
+        throw new HttpsError(
+          "permission-denied",
+          "صاحب الورشة يمكنه فقط إرسال المسودة أو إلغاء الطلب قبل التأكيد"
+        );
+      }
+    }
+
+    const validNext = allowedTransitions[currentStatus] || [];
+    if (!validNext.includes(newStatus)) {
+      throw new HttpsError(
+        "failed-precondition",
+        `انتقال حالة غير مسموح به من (${currentStatus}) إلى (${newStatus})`
+      );
+    }
+
+    const statusHistory = Array.isArray(order.statusHistory)
+      ? [...order.statusHistory]
+      : [];
+    statusHistory.push({
+      status: newStatus,
+      changedBy: callerUid,
+      changedAt: nowIso,
+      note: note || `تحديث الحالة إلى ${newStatus}`,
+    });
+
+    transaction.update(orderRef, {
+      status: newStatus,
+      statusHistory,
+      updatedAt: now,
+    });
+
+    const auditRef = db.collection("auditLogs").doc();
+    transaction.set(auditRef, {
+      action: "order_status_updated",
+      entityType: "order",
+      entityId: orderId,
+      orderId,
+      before: { status: currentStatus },
+      after: { status: newStatus },
+      actorUid: callerUid,
+      at: now,
+    });
+
+    return { success: true, orderId, status: newStatus };
+  });
+});
+
 

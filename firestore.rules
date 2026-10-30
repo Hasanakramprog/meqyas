@@ -94,11 +94,16 @@ service cloud.firestore {
       match /prices/{priceId} {
         allow read: if isSignedIn();
         allow write: if isSupplier(supplierId) || isAdmin();
+
+        match /history/{historyId} {
+          allow read: if isSignedIn();
+          allow write: if isSupplier(supplierId) || isAdmin();
+        }
       }
 
       // Stock and lots are server-only writes (via Cloud Functions transactions)
       match /stock/{itemId} {
-        allow read: if isSupplier(supplierId) || isAdmin();
+        allow read: if isSignedIn();
         allow write: if false;
       }
 
@@ -115,18 +120,36 @@ service cloud.firestore {
         isSupplier(resource.data.supplierId) ||
         isAdmin()
       );
-      // Status confirmation and inventory deductions are server-only
-      allow create: if isSignedIn() && isOwnerOf(request.resource.data.workshopId);
-      allow update: if isSignedIn() && (
-        isAdmin() ||
-        (isSupplier(resource.data.supplierId) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt']))
+      // Status confirmation and inventory deductions are server-only (via confirmOrder Cloud Function)
+      allow create: if isSignedIn() &&
+        (isOwnerOf(request.resource.data.workshopId) || isAdmin()) &&
+        request.resource.data.status in ['draft', 'sent'];
+      allow update: if isSignedIn() &&
+        request.resource.data.status != 'confirmed' && (
+          isAdmin() ||
+          (
+            isOwnerOf(resource.data.workshopId) &&
+            resource.data.status in ['draft', 'sent'] &&
+            request.resource.data.status in ['draft', 'sent', 'cancelled'] &&
+            request.resource.data.workshopId == resource.data.workshopId
+          ) ||
+          (
+            isSupplier(resource.data.supplierId) &&
+            resource.data.status == 'sent' &&
+            request.resource.data.status in ['sent', 'cancelled'] &&
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'statusHistory', 'updatedAt'])
+          )
+        );
+      allow delete: if isAdmin() || (
+        isSignedIn() &&
+        isOwnerOf(resource.data.workshopId) &&
+        resource.data.status == 'draft'
       );
-      allow delete: if isAdmin();
     }
 
-    // Inventory Movements & Audit Logs are strictly server-side
+    // Inventory Movements & Audit Logs are strictly server-side writes
     match /inventoryMovements/{movementId} {
-      allow read: if isAdmin();
+      allow read: if isAdmin() || (isSignedIn() && isSupplier(resource.data.supplierId));
       allow write: if false;
     }
 

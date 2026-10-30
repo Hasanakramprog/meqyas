@@ -94,10 +94,48 @@ class AdminDashboardScreen extends StatelessWidget {
 
   Widget _buildAdminGrid(BuildContext context, bool isDark) {
     final items = [
-      {'title': 'قواعد الحسابات الهندسية', 'desc': 'تحرير واعتماد معادلات القطاعات والزجاج', 'icon': Icons.rule_folder_outlined, 'color': AppColors.amberPrimary},
-      {'title': 'إدارة المستخدمين والورش', 'desc': 'تفعيل الحسابات وصلاحيات المعلمين والموردين', 'icon': Icons.people_outline_rounded, 'color': AppColors.glassBlue},
-      {'title': 'الكتالوج العام للأصناف', 'desc': 'استيراد وتصدير إكسل وإدارة التصنيفات', 'icon': Icons.category_outlined, 'color': AppColors.success},
-      {'title': 'سجلات التدقيق (Audit Logs)', 'desc': 'مراقبة التعديلات والعمليات الحساسة', 'icon': Icons.history_edu_rounded, 'color': AppColors.slate500},
+      {
+        'title': 'قواعد الحسابات الهندسية',
+        'desc': 'تحرير واعتماد معادلات القطاعات والزجاج',
+        'icon': Icons.rule_folder_outlined,
+        'color': AppColors.amberPrimary,
+        'route': '/dashboard/admin/rules',
+      },
+      {
+        'title': 'إدارة الموردين والحسابات',
+        'desc': 'إنشاء حسابات الموردين وإدارة بيانات الاتصال',
+        'icon': Icons.local_shipping_outlined,
+        'color': AppColors.glassBlue,
+        'route': '/dashboard/admin/suppliers',
+      },
+      {
+        'title': 'الكتالوج العام للأصناف',
+        'desc': 'استيراد وتصدير إكسل وإدارة التصنيفات',
+        'icon': Icons.category_outlined,
+        'color': AppColors.success,
+        'route': '/dashboard/admin/catalog',
+      },
+      {
+        'title': 'مراقبة أوامر الشراء والطلبات',
+        'desc': 'متابعة طلبات التوريد وتأكيد المخزون',
+        'icon': Icons.receipt_long_rounded,
+        'color': AppColors.amberPrimary,
+        'route': '/dashboard/admin/orders',
+      },
+      {
+        'title': 'بوابة الموردين والأسعار والمخزون',
+        'desc': 'إدارة تسعير الموردين والأرصدة وحركات المستودع',
+        'icon': Icons.inventory_2_outlined,
+        'color': AppColors.glassBlueLight,
+        'route': '/dashboard/supplier',
+      },
+      {
+        'title': 'سجلات التدقيق (Audit Logs)',
+        'desc': 'مراقبة التعديلات والعمليات الحساسة',
+        'icon': Icons.history_edu_rounded,
+        'color': AppColors.slate500,
+        'route': '/dashboard/admin/rules',
+      },
     ];
 
     return GridView.builder(
@@ -113,14 +151,11 @@ class AdminDashboardScreen extends StatelessWidget {
       itemBuilder: (context, index) {
         final item = items[index];
         final color = item['color'] as Color;
+        final route = item['route'] as String;
         return Card(
           child: InkWell(
             borderRadius: BorderRadius.circular(12),
-            onTap: () {
-              if (index == 0 || index == 3) {
-                context.push('/dashboard/admin/rules');
-              }
-            },
+            onTap: () => context.push(route),
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: Row(

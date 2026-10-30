@@ -563,6 +563,30 @@ class _OwnerDashboardScreenState extends ConsumerState<OwnerDashboardScreen> {
         'onTap': () => _showNewProjectDialog(context, activeWorkshopId),
       },
       {
+        'title': 'سلة الاحتياجات والتوريد',
+        'desc': 'تجميع قضبان الألمنيوم والزجاج والإكسسوارات وطلبها',
+        'icon': Icons.shopping_cart_checkout_rounded,
+        'color': AppColors.success,
+        'onTap': () =>
+            context.push('/dashboard/owner/cart?workshopId=$activeWorkshopId'),
+      },
+      {
+        'title': 'طلبات التوريد والموردين',
+        'desc': 'متابعة أوامر الشراء والـ PDF والواتساب ودليل الموردين',
+        'icon': Icons.local_shipping_outlined,
+        'color': AppColors.glassBlueLight,
+        'onTap': () => context.push(
+          '/dashboard/owner/orders?workshopId=$activeWorkshopId',
+        ),
+      },
+      {
+        'title': 'دليل الموردين والأسعار',
+        'desc': 'استعراض الموردين المعتمدين وأسعار وتوفر المواد',
+        'icon': Icons.storefront_rounded,
+        'color': AppColors.glassBlue,
+        'onTap': () => context.push('/dashboard/owner/suppliers'),
+      },
+      {
         'title': 'قواعد ومعايير الورشة',
         'desc': 'تخصيص معادلات التقطيع وإعدادات منشار 660سم',
         'icon': Icons.tune_rounded,

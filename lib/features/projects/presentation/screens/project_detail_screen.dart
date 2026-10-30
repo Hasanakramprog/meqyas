@@ -9,6 +9,8 @@ import '../../data/projects_repository.dart';
 import '../../domain/models/project.dart';
 import '../../domain/models/project_unit.dart';
 import 'package:meqyas/features/cut_optimization/data/cut_plan_repository.dart';
+import 'package:meqyas/features/cart/data/cart_repository.dart';
+import 'package:meqyas/features/catalog/data/catalog_repository.dart';
 import '../widgets/bar_layout_view.dart';
 import '../widgets/cutting_list_view.dart';
 import 'quick_entry_sheet.dart';
@@ -79,6 +81,59 @@ class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> with 
           error: (_, _) => const Text('المشروع'),
         ),
         actions: [
+          IconButton(
+            tooltip: 'إضافة مواد المشروع للسلة',
+            icon: const Icon(
+              Icons.add_shopping_cart_rounded,
+              color: AppColors.success,
+            ),
+            onPressed: () async {
+              final units = unitsAsync.value ?? const [];
+              if (units.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('أضف وحدات للمشروع أولاً قبل تجميع المواد'),
+                  ),
+                );
+                return;
+              }
+              final engine = ref.read(calculatorEngineProvider(workshopId));
+              final optimizer =
+                  ref.read(cuttingOptimizerProvider(workshopId)).value ??
+                      const CutOptimizer();
+              final catalogItems =
+                  ref.read(activeCatalogItemsProvider).value ?? [];
+              final items = CartRepository.aggregateFromProject(
+                projectId: widget.projectId,
+                projectName: projectAsync.value?.name ?? 'مشروع',
+                units: units,
+                engine: engine,
+                optimizer: optimizer,
+                catalogItems: catalogItems,
+              );
+              final count = await ref
+                  .read(cartRepositoryProvider)
+                  .upsertProjectCartItems(
+                    workshopId: workshopId,
+                    items: items,
+                  );
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      'تمت إضافة/تحديث $count بند في سلة الاحتياجات',
+                    ),
+                    action: SnackBarAction(
+                      label: 'فتح السلة',
+                      onPressed: () => context.push(
+                        '/dashboard/owner/cart?workshopId=$workshopId',
+                      ),
+                    ),
+                  ),
+                );
+              }
+            },
+          ),
           IconButton(
             tooltip: 'إدخال سريع للقياسات',
             icon: const Icon(Icons.flash_on_rounded, color: AppColors.amberPrimary),

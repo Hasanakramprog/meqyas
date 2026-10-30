@@ -93,14 +93,15 @@ lib/features/
 
 ### 5.1 Catalog Feature (`lib/features/catalog/`)
 - **Model `CatalogItem`**:
-  - `id`, `code` (unique uppercase, e.g. `AL-TRK-2000`), `arabicName`, `categoryId`, `unit` (`bar`, `roll`, `piece`, `m`, `cm`, `mm`), `color`, `thickness`, `status` (`active`/`inactive`), `createdAt`, `updatedAt`.
+  - `id`, `code` (unique uppercase, e.g. `AL-TRK-2000`), `engineItemCode` (links to `maqyas_engine` item codes like `track`, `u_profile`, `kaab`, `glass_handle`, `water_plug`, etc.), `arabicName`, `categoryId`, `unit` (`bar`, `roll`, `piece`, `m`, `cm`, `mm`), `color`, `thickness`, `status` (`active`/`inactive`), `createdAt`, `updatedAt`.
+  - **Commercial Unit Rule (Spec §8.7 & §16.5):** Items in `fiber` (mesh) or `brush` categories must use `roll` (`لفة`) as their commercial pricing/stock/order unit.
 - **Predefined Categories**:
-  - `aluminum` (مقاطع ألمنيوم), `accessories` (إكسسوارات), `glass` (زجاج), `fiber` (شبك منخل), `plastic` (بلاستيك وربر), `tools` (براغي وتثبيت).
+  - `aluminum` (مقاطع ألمنيوم), `accessories` (إكسسوارات), `glass` (زجاج), `fiber` (شبك منخل وفرش), `plastic` (بلاستيك وربر), `tools` (براغي وتثبيت).
 - **Admin Catalog Screen (`/dashboard/admin/catalog`)**:
-  - Search bar (by code or Arabic name), category filter chips.
-  - Add/Edit Item Modal with validation (code must be alphanumeric and unique).
-  - Excel Import Button: parses uploaded `.xlsx` file, validates columns, checks for duplicate codes, batch writes to Firestore.
-  - Excel Export Button: downloads active catalog items formatted in UTF-8 Arabic `.xlsx`.
+  - Search bar (by code, engineItemCode, or Arabic name), category filter chips.
+  - Add/Edit Item Modal with validation (code must be alphanumeric and unique; `fiber`/`brush` enforces `roll` unit).
+  - Excel Import Button (`file_picker` + `excel`): parses uploaded `.xlsx` file, validates columns, checks for duplicate codes with row numbers, batch writes to Firestore.
+  - Excel Export Button: downloads/shares active catalog items formatted in UTF-8 Arabic `.xlsx`.
 
 ### 5.2 Suppliers & Supplier Portal (`lib/features/suppliers/` & `lib/features/supplier_portal/`)
 - **Model `Supplier`**:
@@ -125,20 +126,20 @@ lib/features/
 ### 5.4 Workshop Cart (`lib/features/cart/`)
 - **Path in Firestore:** `workshops/{workshopId}/cart/{cartItemId}`
 - **Model `CartItem`**:
-  - `id`, `itemId`, `nameArabic`, `qty`, `unit`, `category`, `sourceProjectId`, `sourceProjectName`, `note`, `suggestedSupplierId`.
+  - `id`, `itemId`, `engineItemCode`, `nameArabic`, `qty`, `unit`, `unitPrice`, `category`, `sourceProjectId`, `sourceProjectName`, `sourceUnitId`, `note`, `suggestedSupplierId`.
 - **Cart Aggregation Engine (`CartService.aggregateFromProject`)**:
   - Tapping «إضافة المواد للسلة» from a project/cut plan computes:
-    1. **Aluminum Bars:** converts `BarCuttingPlan` count into bar items (e.g. 5 bars of `track`, 4 bars of `kaab`).
+    1. **Aluminum Bars:** converts `BarCuttingPlan` count into bar items (e.g. 5 bars of `track`, 4 bars of `kaab`), linking via `engineItemCode` and color.
     2. **Glass Panes:** calculates glass pane count and m² area per glass type.
     3. **Accessories:** computes handles, rollers, gasket, corners, plugs, and screws based on unit specifications (per spec §8.6).
 - **Cart Screen (`/dashboard/owner/cart`)**:
   - Group items by Supplier or Category.
   - Edit quantities, add notes, delete items.
-  - Checkout Button: splits cart items by supplier and creates draft/sent Orders.
+  - Checkout Button: splits cart items by supplier and creates draft/sent Orders with frozen `unitPrice`.
 
 ### 5.5 Orders & Supplier Communication (`lib/features/orders/`)
 - **Model `OrderModel`**:
-  - `id`, `orderNumber` (e.g. `PO-2026-0001`), `workshopId`, `workshopName`, `workshopPhone`, `workshopLocation`, `supplierId`, `supplierName`, `status` (`draft`, `sent`, `confirmed`, `preparing`, `completed`, `cancelled`), `items`, `notes`, `idempotencyKey`, `totalAmount`, `currency`, `confirmedBy`, `confirmedAt`, `createdAt`, `updatedAt`, `statusHistory`.
+  - `id`, `orderNumber` (e.g. `PO-2026-0001`), `workshopId`, `workshopName`, `workshopPhone`, `workshopLocation`, `supplierId`, `supplierName`, `status` (`draft`, `sent`, `confirmed`, `preparing`, `completed`, `cancelled`), `items` (each containing `itemId`, `nameArabic`, `qty`, `unit`, `unitPrice`, `projectId`, `unitId`, `note`), `notes`, `idempotencyKey`, `totalAmount`, `currency`, `confirmedBy`, `confirmedAt`, `createdAt`, `updatedAt`, `statusHistory`.
 - **Purchase Order PDF Generator (`PurchaseOrderPdfGenerator`)**:
   - Formal Arabic RTL document with Cairo font.
   - Workshop header + Supplier details.
@@ -168,132 +169,25 @@ To satisfy the spec §15 Definition of Done:
 > *Preview never changes stock; confirm deducts once; retry doesn't double-deduct; insufficient stock changes nothing.*
 
 ### Function Implementation Plan (`functions/src/index.ts`):
-```typescript
-export const confirmOrder = onCall(async (request) => {
-  // 1. Authentication & Authorization Check
-  if (!request.auth) throw new HttpsError("unauthenticated", "Auth required");
-  const callerUid = request.auth.uid;
-  const callerRole = request.auth.token.role;
-  const callerSupplierId = request.auth.token.supplierId;
-
-  const { orderId, idempotencyKey } = request.data || {};
-  if (!orderId || !idempotencyKey) {
-    throw new HttpsError("invalid-argument", "Missing orderId or idempotencyKey");
-  }
-
-  const orderRef = db.collection("orders").doc(orderId);
-
-  return await db.runTransaction(async (transaction) => {
-    // 2. Read Order Document
-    const orderDoc = await transaction.get(orderRef);
-    if (!orderDoc.exists) throw new HttpsError("not-found", "Order not found");
-    const order = orderDoc.data()!;
-
-    // Authorization: Only the assigned supplier or admin can confirm
-    if (callerRole !== "admin" && callerSupplierId !== order.supplierId) {
-      throw new HttpsError("permission-denied", "Only assigned supplier can confirm order");
-    }
-
-    // 3. Idempotency Check: Already confirmed with same idempotencyKey?
-    if (order.status === "confirmed" && order.idempotencyKey === idempotencyKey) {
-      return { success: true, alreadyConfirmed: true, orderId };
-    }
-    if (order.status !== "sent" && order.status !== "draft") {
-      throw new HttpsError("failed-precondition", `Order cannot be confirmed in status ${order.status}`);
-    }
-
-    const supplierId = order.supplierId;
-    const items = order.items as Array<{ itemId: string; qty: number; nameArabic: string; unit: string }>;
-
-    // 4. Pre-read ALL stock items
-    const stockRefs = items.map((item) => db.doc(`suppliers/${supplierId}/stock/${item.itemId}`));
-    const stockDocs = await Promise.all(stockRefs.map((ref) => transaction.get(ref)));
-
-    // 5. Atomic Stock Verification (All or Nothing)
-    for (let i = 0; i < items.length; i++) {
-      const item = items[i];
-      const stockDoc = stockDocs[i];
-      const currentBalance = stockDoc.exists ? (stockDoc.data()?.balance || 0) : 0;
-
-      if (currentBalance < item.qty) {
-        // ABORT: Insufficient stock changes NOTHING!
-        throw new HttpsError(
-          "failed-precondition",
-          `الرصيد غير كافٍ للصنف «${item.nameArabic}». المتوفر: ${currentBalance}، المطلوب: ${item.qty}. لم يتم خصم أي كمية.`
-        );
-      }
-    }
-
-    // 6. Deduct Stock & Write Inventory Movements
-    const now = FieldValue.serverTimestamp();
-    for (let i = 0; i < items.length; i++) {
-      const item = items[i];
-      const stockRef = stockRefs[i];
-      const currentBalance = stockDocs[i].data()?.balance || 0;
-      const newBalance = currentBalance - item.qty;
-
-      transaction.update(stockRef, {
-        balance: newBalance,
-        updatedAt: now,
-      });
-
-      // Write inventory movement log
-      const movementRef = db.collection("inventoryMovements").doc();
-      transaction.set(movementRef, {
-        movementId: movementRef.id,
-        itemId: item.itemId,
-        supplierId,
-        qty: item.qty,
-        unit: item.unit,
-        movementType: "deduction",
-        orderId,
-        idempotencyKey,
-        actorUid: callerUid,
-        createdAt: now,
-      });
-    }
-
-    // 7. Update Order Status
-    const statusHistory = order.statusHistory || [];
-    statusHistory.push({
-      status: "confirmed",
-      changedBy: callerUid,
-      changedAt: now,
-      note: "تم تأكيد الطلب وخصم الكميات من مستودع المورد بنجاح",
-    });
-
-    transaction.update(orderRef, {
-      status: "confirmed",
-      confirmedBy: callerUid,
-      confirmedAt: now,
-      idempotencyKey,
-      statusHistory,
-      updatedAt: now,
-    });
-
-    // 8. Write Audit Log
-    const auditRef = db.collection("auditLogs").doc();
-    transaction.set(auditRef, {
-      action: "order_confirmed",
-      orderId,
-      supplierId,
-      actorUid: callerUid,
-      itemsCount: items.length,
-      at: now,
-    });
-
-    return { success: true, orderId, confirmedAt: now };
-  });
-});
-```
+- **Aggregates quantities by `itemId`** before checking or deducting balances so multiple lines referencing the same `itemId` never overwrite each other.
+- **Enforces Firestore 500-op transaction limit** by rejecting orders with $>150$ unique items.
+- **Idempotent check**: if `order.status === "confirmed"` and `order.idempotencyKey === idempotencyKey`, returns `{ success: true, alreadyConfirmed: true, orderId }` without deducting stock again.
+- **All-or-nothing stock verification**: pre-reads all `suppliers/{supplierId}/stock/{itemId}` docs; if any `currentBalance < requiredQty`, aborts the entire transaction and changes nothing.
+- **Writes `inventoryMovements` and `auditLogs`** atomically inside the same transaction.
 
 ---
 
-## 7. Cloud Function: Restock / Adjust Stock (`adjustStock`)
-Allows the supplier or admin to add inventory balances safely through server transactions:
-- `adjustStock({ supplierId, itemId, qty, reason })`
-- Transaction updates `suppliers/{supplierId}/stock/{itemId}` balance.
-- Creates `inventoryMovements` record with `movementType: 'restock'` or `'adjustment'`.
+## 7. Cloud Functions: `adjustStock` & `updateOrderStatus`
+1. **`adjustStock({ supplierId, itemId, qty, movementType, unit, reason })`**:
+   - Allows the supplier or admin to restock or adjust inventory balances safely through server transactions.
+   - Prevents negative stock balances (`newBalance < 0` throws `failed-precondition`).
+   - Creates `inventoryMovements` record (`restock` or `adjustment`) and `auditLogs` entry.
+2. **`updateOrderStatus({ orderId, newStatus, note })`** (Spec §11 line 340):
+   - Enforces post-confirmation status transition table:
+     - `confirmed` $\to$ `preparing` | `cancelled`
+     - `preparing` $\to$ `completed`
+     - `draft` / `sent` $\to$ `cancelled`
+   - Appends to `statusHistory` and writes `auditLogs`.
 
 ---
 

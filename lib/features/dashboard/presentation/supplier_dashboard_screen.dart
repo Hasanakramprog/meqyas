@@ -1,3 +1,4 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../../../app/theme/app_colors.dart';
@@ -17,6 +18,17 @@ class SupplierDashboardScreen extends StatelessWidget {
           icon: const Icon(Icons.arrow_back_rounded),
           onPressed: () => context.go('/'),
         ),
+        actions: [
+          IconButton(
+            tooltip: 'تسجيل الخروج',
+            icon: const Icon(Icons.logout_rounded),
+            onPressed: () async {
+              await FirebaseAuth.instance.signOut();
+              if (context.mounted) context.go('/auth/login');
+            },
+          ),
+          const SizedBox(width: 8),
+        ],
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
@@ -81,9 +93,27 @@ class SupplierDashboardScreen extends StatelessWidget {
 
   Widget _buildSupplierGrid(BuildContext context, bool isDark) {
     final items = [
-      {'title': 'الطلبات الواردة', 'desc': 'مراجعة طلبات الورش وتأكيد الاستلام', 'icon': Icons.inbox_rounded, 'color': AppColors.glassBlue},
-      {'title': 'قائمة الأسعار', 'desc': 'تعديل أسعار المقاطع والزجاج والإكسسوارات', 'icon': Icons.price_change_outlined, 'color': AppColors.amberPrimary},
-      {'title': 'المستودع والمخزون', 'desc': 'أرصدة القضبان واللفات والكميات المحجوزة', 'icon': Icons.inventory_2_outlined, 'color': AppColors.success},
+      {
+        'title': 'الطلبات الواردة',
+        'desc': 'مراجعة طلبات الورش وتأكيد الاستلام وخصم المخزون',
+        'icon': Icons.inbox_rounded,
+        'color': AppColors.glassBlue,
+        'route': '/dashboard/supplier/orders',
+      },
+      {
+        'title': 'قائمة الأسعار',
+        'desc': 'تعديل أسعار المقاطع والزجاج والإكسسوارات وسجل الأسعار',
+        'icon': Icons.price_change_outlined,
+        'color': AppColors.amberPrimary,
+        'route': '/dashboard/supplier/prices',
+      },
+      {
+        'title': 'المستودع والمخزون',
+        'desc': 'أرصدة القضبان واللفات وتغذية المخزون وسجل الحركات',
+        'icon': Icons.inventory_2_outlined,
+        'color': AppColors.success,
+        'route': '/dashboard/supplier/stock',
+      },
     ];
 
     return GridView.builder(
@@ -99,9 +129,13 @@ class SupplierDashboardScreen extends StatelessWidget {
       itemBuilder: (context, index) {
         final item = items[index];
         final color = item['color'] as Color;
+        final route = item['route'] as String;
         return Card(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: () => context.push(route),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
             child: Row(
               children: [
                 Container(
@@ -138,6 +172,7 @@ class SupplierDashboardScreen extends StatelessWidget {
                 ),
               ],
             ),
+          ),
           ),
         );
       },

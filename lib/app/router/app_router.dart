@@ -21,6 +21,16 @@ import '../../features/rules/presentation/workshop_rules_screen.dart';
 import '../../features/cut_optimization/presentation/screens/cut_plan_screen.dart';
 import '../../features/cut_optimization/presentation/screens/remnants_screen.dart';
 import '../../features/cut_scanner/presentation/screens/qr_piece_scanner_screen.dart';
+import '../../features/cart/presentation/cart_screen.dart';
+import '../../features/catalog/presentation/admin_catalog_screen.dart';
+import '../../features/orders/presentation/admin_orders_overview_screen.dart';
+import '../../features/orders/presentation/order_detail_screen.dart';
+import '../../features/orders/presentation/orders_list_screen.dart';
+import '../../features/supplier_portal/presentation/supplier_orders_screen.dart';
+import '../../features/supplier_portal/presentation/supplier_prices_screen.dart';
+import '../../features/supplier_portal/presentation/supplier_stock_screen.dart';
+import '../../features/suppliers/presentation/admin_suppliers_screen.dart';
+import '../../features/suppliers/presentation/suppliers_directory_screen.dart';
 
 class RouterNotifier extends ChangeNotifier {
   final Ref _ref;
@@ -225,6 +235,36 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             name: 'qr_scanner',
             builder: (context, state) => const QrPieceScannerScreen(),
           ),
+          GoRoute(
+            path: 'cart',
+            name: 'owner_cart',
+            builder: (context, state) {
+              final wid = state.uri.queryParameters['workshopId'];
+              return CartScreen(initialWorkshopId: wid);
+            },
+          ),
+          GoRoute(
+            path: 'orders',
+            name: 'owner_orders',
+            builder: (context, state) {
+              final wid = state.uri.queryParameters['workshopId'];
+              return OrdersListScreen(initialWorkshopId: wid);
+            },
+            routes: [
+              GoRoute(
+                path: ':orderId',
+                name: 'owner_order_detail',
+                builder: (context, state) => OrderDetailScreen(
+                  orderId: state.pathParameters['orderId']!,
+                ),
+              ),
+            ],
+          ),
+          GoRoute(
+            path: 'suppliers',
+            name: 'owner_suppliers',
+            builder: (context, state) => const SuppliersDirectoryScreen(),
+          ),
         ],
       ),
       GoRoute(
@@ -236,6 +276,32 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: '/dashboard/supplier',
         name: 'supplier_dashboard',
         builder: (context, state) => const SupplierDashboardScreen(),
+        routes: [
+          GoRoute(
+            path: 'orders',
+            name: 'supplier_orders',
+            builder: (context, state) => const SupplierOrdersScreen(),
+            routes: [
+              GoRoute(
+                path: ':orderId',
+                name: 'supplier_order_detail',
+                builder: (context, state) => OrderDetailScreen(
+                  orderId: state.pathParameters['orderId']!,
+                ),
+              ),
+            ],
+          ),
+          GoRoute(
+            path: 'prices',
+            name: 'supplier_prices',
+            builder: (context, state) => const SupplierPricesScreen(),
+          ),
+          GoRoute(
+            path: 'stock',
+            name: 'supplier_stock',
+            builder: (context, state) => const SupplierStockScreen(),
+          ),
+        ],
       ),
       GoRoute(
         path: '/dashboard/admin',
@@ -246,6 +312,21 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             path: 'rules',
             name: 'admin_rules',
             builder: (context, state) => const AdminRulesScreen(),
+          ),
+          GoRoute(
+            path: 'catalog',
+            name: 'admin_catalog',
+            builder: (context, state) => const AdminCatalogScreen(),
+          ),
+          GoRoute(
+            path: 'suppliers',
+            name: 'admin_suppliers',
+            builder: (context, state) => const AdminSuppliersScreen(),
+          ),
+          GoRoute(
+            path: 'orders',
+            name: 'admin_orders',
+            builder: (context, state) => const AdminOrdersOverviewScreen(),
           ),
         ],
       ),
