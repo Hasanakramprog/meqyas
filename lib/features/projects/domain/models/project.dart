@@ -11,6 +11,7 @@ class Project {
   final int unitCount;
   final DateTime createdAt;
   final DateTime updatedAt;
+  final DateTime? requirementsGeneratedAt;
 
   const Project({
     required this.id,
@@ -23,6 +24,7 @@ class Project {
     this.unitCount = 0,
     required this.createdAt,
     required this.updatedAt,
+    this.requirementsGeneratedAt,
   });
 
   Map<String, dynamic> toMap() {
@@ -36,6 +38,8 @@ class Project {
       'unitCount': unitCount,
       'createdAt': Timestamp.fromDate(createdAt),
       'updatedAt': Timestamp.fromDate(updatedAt),
+      if (requirementsGeneratedAt != null)
+        'requirementsGeneratedAt': Timestamp.fromDate(requirementsGeneratedAt!),
     };
   }
 
@@ -52,6 +56,9 @@ class Project {
       unitCount: (data['unitCount'] as num?)?.toInt() ?? 0,
       createdAt: _parseDate(data['createdAt']),
       updatedAt: _parseDate(data['updatedAt']),
+      requirementsGeneratedAt: data['requirementsGeneratedAt'] != null
+          ? _parseDate(data['requirementsGeneratedAt'])
+          : null,
     );
   }
 
@@ -72,6 +79,7 @@ class Project {
     int? unitCount,
     DateTime? createdAt,
     DateTime? updatedAt,
+    DateTime? requirementsGeneratedAt,
   }) {
     return Project(
       id: id ?? this.id,
@@ -84,6 +92,8 @@ class Project {
       unitCount: unitCount ?? this.unitCount,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
+      requirementsGeneratedAt:
+          requirementsGeneratedAt ?? this.requirementsGeneratedAt,
     );
   }
 }

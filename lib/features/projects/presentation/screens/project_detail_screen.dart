@@ -9,8 +9,6 @@ import '../../data/projects_repository.dart';
 import '../../domain/models/project.dart';
 import '../../domain/models/project_unit.dart';
 import 'package:meqyas/features/cut_optimization/data/cut_plan_repository.dart';
-import 'package:meqyas/features/cart/data/cart_repository.dart';
-import 'package:meqyas/features/catalog/data/catalog_repository.dart';
 import '../widgets/bar_layout_view.dart';
 import '../widgets/cutting_list_view.dart';
 import 'quick_entry_sheet.dart';
@@ -82,56 +80,15 @@ class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> with 
         ),
         actions: [
           IconButton(
-            tooltip: 'إضافة مواد المشروع للسلة',
+            tooltip: 'احتياجات المشروع من المواد',
             icon: const Icon(
-              Icons.add_shopping_cart_rounded,
+              Icons.fact_check_rounded,
               color: AppColors.success,
             ),
-            onPressed: () async {
-              final units = unitsAsync.value ?? const [];
-              if (units.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('أضف وحدات للمشروع أولاً قبل تجميع المواد'),
-                  ),
-                );
-                return;
-              }
-              final engine = ref.read(calculatorEngineProvider(workshopId));
-              final optimizer =
-                  ref.read(cuttingOptimizerProvider(workshopId)).value ??
-                      const CutOptimizer();
-              final catalogItems =
-                  ref.read(activeCatalogItemsProvider).value ?? [];
-              final items = CartRepository.aggregateFromProject(
-                projectId: widget.projectId,
-                projectName: projectAsync.value?.name ?? 'مشروع',
-                units: units,
-                engine: engine,
-                optimizer: optimizer,
-                catalogItems: catalogItems,
+            onPressed: () {
+              context.push(
+                '/dashboard/owner/projects/${widget.projectId}/requirements?workshopId=$workshopId',
               );
-              final count = await ref
-                  .read(cartRepositoryProvider)
-                  .upsertProjectCartItems(
-                    workshopId: workshopId,
-                    items: items,
-                  );
-              if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(
-                      'تمت إضافة/تحديث $count بند في سلة الاحتياجات',
-                    ),
-                    action: SnackBarAction(
-                      label: 'فتح السلة',
-                      onPressed: () => context.push(
-                        '/dashboard/owner/cart?workshopId=$workshopId',
-                      ),
-                    ),
-                  ),
-                );
-              }
             },
           ),
           IconButton(
@@ -177,26 +134,12 @@ class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> with 
               );
             },
           ),
-          PopupMenuButton<String>(
-            tooltip: 'خيارات المشروع',
-            icon: const Icon(Icons.more_vert_rounded),
-            onSelected: (val) {
-              if (val == 'delete') {
-                _confirmDeleteProject(context, ref, workshopId, projectAsync.value?.name ?? '');
-              }
+          IconButton(
+            tooltip: 'حذف المشروع',
+            icon: const Icon(Icons.delete_outline_rounded, color: AppColors.error),
+            onPressed: () {
+              _confirmDeleteProject(context, ref, workshopId, projectAsync.value?.name ?? '');
             },
-            itemBuilder: (_) => [
-              const PopupMenuItem(
-                value: 'delete',
-                child: Row(
-                  children: [
-                    Icon(Icons.delete_outline_rounded, color: AppColors.error, size: 20),
-                    SizedBox(width: 8),
-                    Text('حذف المشروع', style: TextStyle(color: AppColors.error)),
-                  ],
-                ),
-              ),
-            ],
           ),
           const SizedBox(width: 4),
         ],
@@ -546,7 +489,11 @@ class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> with 
         ),
         content: Text(
           'هل أنت متأكد من حذف مشروع «$projectName»؟\n\n'
-          'سيتم حذف جميع وحداته القياسية وخطة القص والفضلات المرتبطة به.',
+          'سيتم حذف جميع البيانات المرتبطة به في قاعدة البيانات:\n'
+          '• وحدات القياس والشبابيك\n'
+          '• جدول احتياجات المشروع من المواد\n'
+          '• خطط القص والملفات والفضلات المرتبطة به\n'
+          '• بنود السلة والمسودات المرتبطة بالمشروع',
         ),
         actions: [
           TextButton(

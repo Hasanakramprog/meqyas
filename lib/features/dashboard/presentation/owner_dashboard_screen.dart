@@ -886,6 +886,20 @@ class _OwnerDashboardScreenState extends ConsumerState<OwnerDashboardScreen> {
                           ),
                         ),
                       ),
+                      const SizedBox(width: 4),
+                      IconButton(
+                        tooltip: 'حذف المشروع',
+                        icon: const Icon(
+                          Icons.delete_outline_rounded,
+                          color: AppColors.error,
+                          size: 20,
+                        ),
+                        onPressed: () => _confirmDeleteProject(
+                          context,
+                          activeWorkshopId,
+                          project,
+                        ),
+                      ),
                     ],
                   ),
                   if (project.location.isNotEmpty) ...[
@@ -917,6 +931,71 @@ class _OwnerDashboardScreenState extends ConsumerState<OwnerDashboardScreen> {
         );
       },
     );
+  }
+
+  Future<void> _confirmDeleteProject(
+    BuildContext context,
+    String workshopId,
+    Project project,
+  ) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.delete_forever_rounded, color: AppColors.error),
+            SizedBox(width: 8),
+            Text('حذف المشروع نهائياً'),
+          ],
+        ),
+        content: Text(
+          'هل أنت متأكد من حذف مشروع «${project.name}»؟\n\n'
+          'سيتم حذف جميع البيانات المرتبطة به في قاعدة البيانات:\n'
+          '• وحدات القياس والشبابيك\n'
+          '• جدول احتياجات المشروع من المواد\n'
+          '• خطط القص والملفات والفضلات المرتبطة به\n'
+          '• بنود السلة والمسودات المرتبطة بالمشروع',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('إلغاء'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.error),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text(
+              'حذف نهائي',
+              style: TextStyle(color: Colors.white),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && context.mounted) {
+      try {
+        await ref
+            .read(projectsRepositoryProvider)
+            .deleteProject(workshopId, project.id);
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'تم حذف مشروع «${project.name}» وجميع بياناته المرتبطة بنجاح ✅',
+              ),
+              backgroundColor: AppColors.success,
+            ),
+          );
+        }
+      } catch (e) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('خطأ أثناء حذف المشروع: $e')),
+          );
+        }
+      }
+    }
   }
 
   void _showNewProjectDialog(BuildContext context, String workshopId) {

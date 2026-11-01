@@ -31,6 +31,7 @@ import '../../features/supplier_portal/presentation/supplier_prices_screen.dart'
 import '../../features/supplier_portal/presentation/supplier_stock_screen.dart';
 import '../../features/suppliers/presentation/admin_suppliers_screen.dart';
 import '../../features/suppliers/presentation/suppliers_directory_screen.dart';
+import '../../features/requirements/presentation/project_requirements_screen.dart';
 
 class RouterNotifier extends ChangeNotifier {
   final Ref _ref;
@@ -202,6 +203,18 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                       return UnitEditorScreen(
                         projectId: projectId,
                         initialUnit: unit,
+                        initialWorkshopId: workshopId,
+                      );
+                    },
+                  ),
+                  GoRoute(
+                    path: 'requirements',
+                    name: 'project_requirements',
+                    builder: (context, state) {
+                      final projectId = state.pathParameters['projectId']!;
+                      final workshopId = state.uri.queryParameters['workshopId'];
+                      return ProjectRequirementsScreen(
+                        projectId: projectId,
                         initialWorkshopId: workshopId,
                       );
                     },

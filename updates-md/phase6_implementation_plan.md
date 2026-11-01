@@ -4,6 +4,12 @@
 **Spec §:** 2 (roles), 6 (data model), 7 (security rules), 10 (catalog/inventory), 11 (cart/suppliers/orders), 12 (reports), 13 (UI/UX), 15 (DoD)  
 **DoD (spec §15):** Preview never changes stock; confirm deducts once; retry doesn't double-deduct; insufficient stock changes nothing.
 
+> [!IMPORTANT]
+> **Plan revision (2026-11-01):**
+> - **Step 1 (§5.4 — DONE ✅):** Owner reviews and edits the **Project Materials Requirements** table (`inStockQty`, `toBuyQty`, manual CRUD).
+> - **Step 2 (§5.5 — NEW PLAN):** From the finalized requirements table (`toBuyQty > 0`), the owner has **3 direct actions**, and the supplier has an **interactive in-app order review & pricing workflow** (mark availability, edit quantities they have, enter manual unit prices, write notes, and send back to the owner).
+> - **No Supplier Stock Tracking:** The supplier does **not** manage warehouse stock/inventory in the app; they simply review incoming workshop orders, indicate which items/quantities they have, enter prices and notes manually, and send the quote back to the workshop owner.
+
 ---
 
 ## 1. Owner Decisions & Defaults
@@ -11,9 +17,9 @@
 | Topic | Decision Needed | Default Used If No Answer | Spec Reference |
 |---|---|---|---|
 | **Order Confirmation Authority** | Who can trigger `confirmOrder` to deduct stock? | Supplier or Admin (pluggable check) | §11, §17 |
-| **Order Status Workflow** | Full lifecycle steps | `draft` → `sent` → `confirmed` → `preparing` → `completed` (or `cancelled`) | §6, §11 |
-| **Stock Deduction Trigger** | When is stock deducted? | Only on explicit callable function `confirmOrder` execution (never on cart/draft/WhatsApp/PDF) | §0.4, §11, §15 |
-| **Cart Material Aggregation** | How are project materials pooled into cart? | One-tap button from Project/CutPlan to populate aluminum bars, glass panes, and accessories | §11, §13 |
+| **Order Status Workflow** | Full lifecycle steps | `sent` (مرسل للمورد) → `quoted` (تم التسعير/التعديل من المورد) → `confirmed` (معتمد) → `preparing` (قيد التجهيز) → `completed` (مكتمل) (or `cancelled`) | §6, §11 |
+| **Stock Deduction Trigger** | When is stock deducted? | Only on explicit callable function `confirmOrder` execution (never on requirements preview, PDF download, WhatsApp share, or initial quote) | §0.4, §11, §15 |
+| **Post-Requirements Flow** | How do project requirements become orders? | **REVISED (§5.4 → §5.5):** After finalizing the *Project Materials Requirements* table (`toBuyQty > 0`), the owner chooses from **3 options**: (1) Download nice Requirements PDF, (2) Select Supplier & Send In-App Order Request, or (3) Select Supplier & Send PDF/Summary via WhatsApp. | §11, §13 |
 | **Currency** | Default currency for pricing & orders | SAR (ريال سعودي) with configurable string field | §6, §17 |
 | **Excel Format** | Columns for Catalog import/export | `code`, `arabicName`, `categoryId`, `unit`, `color`, `thickness`, `status` | §10 |
 | **WhatsApp Message** | Direct link format | `https://wa.me/{phone}?text={encodedSummary}` with workshop header & items table | §11 |
@@ -109,11 +115,10 @@ lib/features/
 - **Admin Supplier Management (`/dashboard/admin/suppliers`)**:
   - List of registered suppliers, create new supplier with login account (calling `createSupplierUser`).
 - **Owner Suppliers Directory (`/dashboard/owner/suppliers`)**:
-  - Cards showing supplier name, phone, WhatsApp buttons, catalog items they carry.
-- **Supplier Portal (`/dashboard/supplier/**`)**:
-  - `/dashboard/supplier/orders`: incoming purchase orders assigned to this supplier.
-  - `/dashboard/supplier/prices`: editable price list for catalog items.
-  - `/dashboard/supplier/stock`: current balances and inventory replenishment.
+  - Cards showing supplier name, phone, WhatsApp buttons.
+- **Supplier Portal (`/dashboard/supplier/**`) — Orders & Quotations Only (No Stock Management)**:
+  - The supplier does **not** track or care about warehouse stock balances in the app.
+  - `/dashboard/supplier` & `/dashboard/supplier/orders`: view incoming order requests from workshops, open any order to mark which items are available, edit quantities, enter unit prices and notes manually, and send the priced order back to the workshop owner.
 
 ### 5.3 Pricing & Inventory Models
 - **`ItemPrice`**:
@@ -123,43 +128,248 @@ lib/features/
 - **`InventoryMovement`**:
   - `movementId`, `itemId`, `supplierId`, `qty`, `unit`, `movementType` (`deduction` | `restock` | `adjustment`), `orderId`, `idempotencyKey`, `createdAt`, `actorUid`.
 
-### 5.4 Workshop Cart (`lib/features/cart/`)
-- **Path in Firestore:** `workshops/{workshopId}/cart/{cartItemId}`
-- **Model `CartItem`**:
-  - `id`, `itemId`, `engineItemCode`, `nameArabic`, `qty`, `unit`, `unitPrice`, `category`, `sourceProjectId`, `sourceProjectName`, `sourceUnitId`, `note`, `suggestedSupplierId`.
-- **Cart Aggregation Engine (`CartService.aggregateFromProject`)**:
-  - Tapping «إضافة المواد للسلة» from a project/cut plan computes:
-    1. **Aluminum Bars:** converts `BarCuttingPlan` count into bar items (e.g. 5 bars of `track`, 4 bars of `kaab`), linking via `engineItemCode` and color.
-    2. **Glass Panes:** calculates glass pane count and m² area per glass type.
-    3. **Accessories:** computes handles, rollers, gasket, corners, plugs, and screws based on unit specifications (per spec §8.6).
-- **Cart Screen (`/dashboard/owner/cart`)**:
-  - Group items by Supplier or Category.
-  - Edit quantities, add notes, delete items.
-  - Checkout Button: splits cart items by supplier and creates draft/sent Orders with frozen `unitPrice`.
+### 5.4 Project Materials Requirements — Owner Step 1 (NEW, replaces direct "Add to Cart")
 
-### 5.5 Orders & Supplier Communication (`lib/features/orders/`)
-- **Model `OrderModel`**:
-  - `id`, `orderNumber` (e.g. `PO-2026-0001`), `workshopId`, `workshopName`, `workshopPhone`, `workshopLocation`, `supplierId`, `supplierName`, `status` (`draft`, `sent`, `confirmed`, `preparing`, `completed`, `cancelled`), `items` (each containing `itemId`, `nameArabic`, `qty`, `unit`, `unitPrice`, `projectId`, `unitId`, `note`), `notes`, `idempotencyKey`, `totalAmount`, `currency`, `confirmedBy`, `confirmedAt`, `createdAt`, `updatedAt`, `statusHistory`.
-- **Purchase Order PDF Generator (`PurchaseOrderPdfGenerator`)**:
-  - Formal Arabic RTL document with Cairo font.
-  - Workshop header + Supplier details.
-  - Order items table with quantities, units, and optional prices.
-  - Delivery instructions and notes.
-- **WhatsApp Order Dispatcher**:
-  - Formats clean Arabic text:
-    ```
-    *طلب توريد مواد — ورشة {workshopName}*
-    رقم الطلب: {orderNumber}
-    المشروع: {projectName}
-    -------------------------
-    • {qty} {unit} — {nameArabic}
-    • ...
-    -------------------------
-    الموقع: {workshopLocation}
-    هاتف: {workshopPhone}
-    ```
-  - Launches `https://wa.me/{supplierPhone}?text={encodedText}`.
-- **Critical Policy:** Stock is **NEVER** deducted when viewing cart, generating PDF, or launching WhatsApp!
+> [!IMPORTANT]
+> **Revised owner flow (this step is the scope for now; everything after it is TBD).**
+> The owner must **first review what the project needs**, and only then decide what to order. Nothing is sent to a supplier, and nothing goes to a cart/order automatically, at this stage.
+
+#### Flow
+```
+Add units to project → Run Cut Optimization (save cut plan)
+        ↓
+«احتياجات المشروع من المواد» (Materials Requirements screen)
+        ↓
+Owner reviews the table → edits / adds / deletes lines manually
+        ↓
+(next step: TBD — to be defined by owner later)
+```
+
+#### End-to-End Owner Scenario (From Creating a Project to Finalizing the Requirements Table)
+1. **Create Project:** Owner creates a project (e.g., «فيلا السيد أحمد») with client info and default aluminum color/thickness.
+2. **Add Units (Windows & Doors):** Owner adds project units (`200 × 150 cm` sliding window with mesh, `120 × 120 cm` window, etc.). The calculation engine computes cutting lists, glass panes/m², accessories, and mesh/brush rolls.
+3. **Run Cut Optimization (`CutPlanScreen`):** Owner runs 1D bin-packing optimization, optionally assigns workshop shelf remnants (قصاصات الرف), and saves the cut plan.
+4. **Open «احتياجات المشروع من المواد» (`ProjectRequirementsScreen`):**
+   - Tapping «احتياجات المشروع من المواد» opens `/dashboard/owner/projects/:projectId/requirements`.
+   - On first visit, the app snapshots all calculated materials for the project into `workshops/{workshopId}/projects/{projectId}/requirements/{lineId}`:
+     - **Aluminum bars:** only *new* 660 cm bars (`!bar.isFromRemnant`) from the saved cut plan.
+     - **Glass:** m² and pane count per glass type.
+     - **Accessories:** handles, rollers, plugs, screws, corners, gasket (spec §8.6).
+     - **Mesh / brush:** commercial `roll` (`لفة`) units only (spec §8.7).
+5. **Owner Reviews & Edits the Table (Full CRUD):**
+   - **Record Workshop Stock (`inStockQty`):** Owner enters how much they already have in the workshop; `toBuyQty` automatically updates to `max(requiredQty - inStockQty, 0)` unless manually overridden.
+   - **Override `toBuyQty`:** Owner can directly type a custom `toBuyQty` (e.g., rounding up to a full box or buying extra spares), which sets `isToBuyOverridden = true`.
+   - **Add Manual Line (`source = manual`):** Owner adds extra items from the Catalog or free-text custom items.
+   - **Delete / Dismiss Line:** Deleting a manual line removes it; deleting an `auto` line marks `dismissed = true` so regeneration won't re-add it unless restored via «استعادة المحذوفات».
+6. **Later Changes to Project Units / Cut Plan (Safe Regeneration Merge Rules):**
+   - Editing units or re-saving the cut plan **never** silently overwrites the owner's table.
+   - Instead, when `project.updatedAt > project.requirementsGeneratedAt`, a warning banner appears: **«تغيرت وحدات المشروع — إعادة التوليد»**.
+   - If the owner ignores the banner, nothing changes.
+   - If the owner taps **«إعادة التوليد»**, the app merges the newly calculated quantities per item:
+     - `requiredQty` updates to the new calculated value.
+     - `inStockQty` and `note` entered by the owner are **preserved**.
+     - If `isToBuyOverridden == false`, `toBuyQty` recomputes as `max(newRequiredQty - inStockQty, 0)`.
+     - If `isToBuyOverridden == true`, the owner's manual `toBuyQty` is **kept** and the row is highlighted with a badge («تغيرت الكمية المحسوبة — راجع الكمية») until reviewed or reset.
+     - Manual lines (`source = manual`) are **preserved** untouched.
+     - Dismissed auto lines (`dismissed = true`) stay hidden unless the owner taps «استعادة المحذوفات».
+7. **Stop Point (Current Scope Boundary):** The flow stops here with the finalized list of items where `toBuyQty > 0`. How those items proceed to suppliers/orders (§5.5) will be defined next by the owner.
+
+#### Entry points
+- Button «احتياجات المشروع من المواد» in `ProjectDetailScreen` and `CutPlanScreen` (replaces the current one-tap «إضافة المواد للسلة» that pushed items straight to the cart).
+- Route: `/dashboard/owner/projects/:projectId/requirements?workshopId=...`
+
+#### How the table is generated
+- On first open, the screen **auto-generates** the requirement lines from the project's units + saved cut plan (existing `CartRepository.aggregateFromProject` logic, moved to a dedicated `RequirementsService`):
+  1. **Aluminum bars:** new 660 cm bars per item from the saved cut plan (shelf remnants consumed are excluded).
+  2. **Glass:** m² and pane count per glass type.
+  3. **Accessories:** handles, rollers, plugs, screws, corners, gasket (spec §8.6).
+  4. **Mesh / brush:** rolls only (spec §8.7).
+- Auto-generated lines are saved once as a **snapshot**; later changes to units do not silently overwrite the owner's manual edits. A banner «تغيرت وحدات المشروع — إعادة التوليد» lets the owner regenerate explicitly using the safe merge rules above.
+
+#### Requirements table (nice, readable, RTL)
+| Column | Notes |
+|---|---|
+| الصنف (name + engine code) | Grouped by category: ألمنيوم / زجاج / إكسسوارات / شبك وفراشة / براغي |
+| الكمية المطلوبة (calculated) | Read-only, from engine/cut plan |
+| لدي في الورشة (in stock at workshop) | Owner-editable; the owner may already own some items |
+| الكمية المطلوب شراؤها (to buy) | `max(required − inStock, 0)` by default, manually overridable |
+| الوحدة | bar / m² / piece / roll … (roll-only for mesh/brush) |
+| ملاحظة | Free text per line |
+| المصدر | `auto` (calculated) or `manual` (added by owner) badge |
+| إجراءات | Edit / Delete |
+
+- Group header rows with per-category subtotal counts; summary bar at top (total lines, lines to buy, lines already covered).
+- Mobile: each line is a card with the same fields; desktop/tablet: data table.
+- A line with `to buy = 0` is shown as «متوفر — لا يحتاج شراء» (dimmed) and excluded from the next step.
+
+#### CRUD on lines (owner)
+- **Create:** «إضافة صنف» → pick from catalog (search by name/code) or free-text custom item; qty + unit + note.
+- **Read:** the table above.
+- **Update:** inline edit of `inStock`, `toBuy`, `note`; edit dialog for name/unit of manual lines. Calculated `required` stays read-only on auto lines (but can be reset via «إعادة الحساب»).
+- **Delete:** remove a line (confirm dialog). Deleting an auto line stores it as `dismissed` so regeneration does not bring it back unless the owner chooses «استعادة المحذوفات».
+- Undo snackbar after delete.
+
+#### Data model
+- Path: `workshops/{workshopId}/projects/{projectId}/requirements/{lineId}` (inside the owner's workshop subtree; already covered by existing security rules).
+- **`RequirementLine`**: `id`, `itemId` (catalog id, nullable for custom), `engineItemCode`, `nameArabic`, `category`, `requiredQty` (calculated), `inStockQty`, `toBuyQty`, `isToBuyOverridden` (bool), `needsReviewAfterRegen` (bool), `unit`, `note`, `source` (`auto` | `manual`), `dismissed` (bool), `createdAt`, `updatedAt`.
+- Project doc gets `requirementsGeneratedAt` to detect staleness vs. units / cut plan.
+
+#### Rules
+- **No stock deduction and no supplier writes** happen on this screen (spec §0.4, §11).
+- Works offline (Firestore persistence), per spec §14.
+- All strings in Arabic via ARB.
+
+#### Code impact (when implemented)
+- New: `lib/features/requirements/{domain/requirement_line.dart, data/requirements_repository.dart, data/requirements_service.dart, presentation/project_requirements_screen.dart}`.
+- Change: `ProjectDetailScreen` / `CutPlanScreen` buttons now navigate to the requirements screen instead of writing to the cart.
+- Router: add `requirements` child route under `projects/:projectId`.
+
+---
+
+### 5.5 Post-Requirements Flow (3 Owner Options) & Supplier Interactive Order Review (NEW)
+
+#### Complete Flow Diagram
+```
+«احتياجات المشروع من المواد» (ProjectRequirementsScreen — items with toBuyQty > 0)
+        │
+        ├──► [Option 1] تحميل PDF للاحتياجات (Download/Print Nice Requirements PDF)
+        │       └─ Generates formal RTL Arabic PDF grouped by category with workshop & project header
+        │
+        ├──► [Option 2] إرسال طلب للمورد داخل التطبيق (Select Supplier → Send In-App Request)
+        │       ├─ 1. Owner picks a Supplier & sends items (toBuyQty > 0) → creates Order (status: `sent`)
+        │       ├─ 2. Supplier receives order in `/dashboard/supplier/orders`
+        │       ├─ 3. Supplier reviews line-by-line:
+        │       │      • Accepts all items as-is, OR modifies each line:
+        │       │        - Toggle Available / Unavailable (`isAvailable`)
+        │       │        - Edit Available Quantity (`suppliedQty` if partial stock)
+        │       │        - Enter Unit Price manually (`unitPrice` per item)
+        │       │        - Write item note (`supplierNote`) + general order note (`supplierResponseNote`)
+        │       ├─ 4. Supplier taps «إرسال الرد والتسعيرة للورشة» → status becomes `quoted` (or `confirmed`)
+        │       └─ 5. Owner sees the priced/modified order in `/dashboard/owner/orders/:orderId`
+        │              with full breakdown, supplier notes, and total price, and can approve/confirm or export PDF
+        │
+        └──► [Option 3] اختيار مورد وإرسال PDF عبر واتساب (Select Supplier → Share PDF & WhatsApp)
+                ├─ 1. Owner selects a Supplier (or enters WhatsApp number)
+                ├─ 2. Generates the Arabic Requirements PDF (with supplier name in header)
+                └─ 3. Opens WhatsApp (`wa.me/{phone}?text=...`) with formatted summary + shares PDF file
+```
+
+---
+
+#### 5.5.1 Action Bar on `ProjectRequirementsScreen` (The 3 Owner Options)
+At the bottom of [`ProjectRequirementsScreen`](file:///Users/macbook/Desktop/codingrepo/meqyas/lib/features/requirements/presentation/project_requirements_screen.dart), when there is at least 1 active item with `toBuyQty > 0`, a persistent action bar offers **3 clear buttons**:
+
+1. **Option 1 — «تحميل PDF للاحتياجات» (`RequirementsPdfGenerator`)**:
+   - Generates a clean, printable Arabic RTL PDF (`lib/features/requirements/data/requirements_pdf_generator.dart`) using the Cairo font:
+     - **Header:** Workshop name, phone, location, Project name, Client name, Date, and summary counts (Total items to buy).
+     - **Grouped Tables:** Separate sections per category (`مقاطع ألمنيوم`, `زجاج`, `إكسسوارات`, `شبك وفراشة`, etc.) showing `#`, `الصنف`, `الكود`, `الكمية المطلوب شراؤها`, `الوحدة`, and `ملاحظات`.
+     - **Footer:** Page numbers and signature/stamp area.
+   - Opens `Printing.layoutPdf` so the owner can save/download/print the PDF directly.
+
+2. **Option 2 — «إرسال للمورد بالتطبيق» (Select Supplier & Send In-App Order)**:
+   - Opens a **Select Supplier Dialog** (`_showSelectSupplierDialog`):
+     - Lists active suppliers from `suppliers` collection (showing name, phone, address).
+     - Optional field for `ملاحظات الورشة للمورد` (general delivery/project note).
+   - When the owner confirms:
+     - Filters active requirement lines where `toBuyQty > 0`.
+     - Creates an `OrderModel` in `orders/{orderId}` with:
+       - `status: OrderStatus.sent` (`بانتظار رد وتسعير المورد`)
+       - `projectId` & `projectName` linked to the project
+       - Each `OrderLineItem` initialized with `requestedQty = line.toBuyQty`, `qty = line.toBuyQty`, `isAvailable = true`, `unitPrice = 0` (to be filled manually by the supplier), and `note = line.note`.
+     - Navigates or shows a snackbar linking to `/dashboard/owner/orders/:orderId`.
+
+3. **Option 3 — «إرسال PDF عبر واتساب» (Select Supplier & Send to WhatsApp + PDF)**:
+   - Opens the **Select Supplier for WhatsApp Dialog**:
+     - Owner picks a supplier from the directory (or types a custom WhatsApp phone number).
+     - If the supplier has multiple WhatsApp numbers (`whatsappPhones`), lets the owner pick which number to message.
+   - Generates the Requirements PDF addressed to that supplier and gives the owner two immediate actions in one step:
+     - Launches `https://wa.me/{phone}?text={encodedArabicSummary}` with the project's required items.
+     - Opens `Printing.sharePdf(bytes: pdfBytes, filename: 'طلب_مواد_{projectName}.pdf')` so the owner can attach the generated PDF file directly into the WhatsApp chat.
+
+---
+
+#### 5.5.2 Supplier In-App Order Review, Modification & Manual Pricing
+When a Supplier logs in (`/dashboard/supplier/orders`) and opens an incoming order (`OrderDetailScreen` or dedicated `SupplierOrderReviewScreen`):
+
+1. **Line-by-Line Interactive Table / Cards for Supplier:**
+   For every item requested by the owner, the supplier sees:
+   - **الصنف والكمية المطلوبة من الورشة (`requestedQty` + `unit`)** + owner's `note`.
+   - **التوفر لدى المورد (`isAvailable` toggle/checkbox):**
+     - Supplier can mark an item as **«متوفر»** (`true`) or **«غير متوفر لدى المورد»** (`false`).
+     - If marked unavailable (`isAvailable = false`), `suppliedQty` becomes `0` and its line total becomes `0`.
+   - **الكمية المتوفرة للتوريد (`qty` / `suppliedQty`):**
+     - Defaults to `requestedQty`.
+     - Supplier can edit it manually (e.g., owner requested `10` bars, supplier only has `6` bars in stock → enters `6`).
+     - If `qty < requestedQty` and `qty > 0`, badge shows **«متوفر جزئياً»**.
+   - **سعر الوحدة (`unitPrice` — Manual Input by Supplier):**
+     - Text field where the supplier types the price per unit manually (in `SAR`).
+     - Automatically calculates and displays **إجمالي البند (`qty × unitPrice`)**.
+   - **ملاحظة المورد على الصنف (`supplierNote`):**
+     - Free-text note per item (e.g., *"متوفر لون بديل"*, *"سيتوفر الأسبوع القادم"*).
+
+2. **Supplier General Note & Live Total Bar:**
+   - Field for **«ملاحظات المورد العامة على الطلب» (`supplierResponseNote`)** (e.g., delivery time, payment terms).
+   - Live summary showing:
+     - Available items count vs. Unavailable items count.
+     - **الإجمالي الكلي للتسعيرة (`totalAmount = sum(qty * unitPrice)`)**.
+
+3. **Supplier Submit Actions:**
+   - **«قبول الطلب بالكامل وإرسال التسعيرة»** or **«حفظ التعديلات وإرسال التسعيرة للورشة»**:
+     - Saves all updated `items` (`isAvailable`, `qty`, `unitPrice`, `supplierNote`), `supplierResponseNote`, and `totalAmount`.
+     - Transitions order `status` from `sent` $\to$ `quoted` («تم التسعير والرد من المورد»).
+     - Appends a `StatusHistoryEntry` recording the supplier's response timestamp and summary.
+
+---
+
+#### 5.5.3 Owner View of Supplier's Priced / Modified Order
+When the owner opens `/dashboard/owner/orders` or `/dashboard/owner/orders/:orderId`:
+- Sees a status badge:
+  - `sent`: «مرسل للمورد — بانتظار التسعير»
+  - `quoted`: «وصل رد وتسعيرة المورد — بانتظار اعتمادك»
+  - `confirmed`: «معتمد ومؤكد»
+- Sees a clear comparison per line:
+  - **الكمية المطلوبة (`requestedQty`)** vs **الكمية المتوفرة من المورد (`qty`)** (highlighted if partial or unavailable `غير متوفر`).
+  - **سعر الوحدة (`unitPrice`)** and **إجمالي الصنف (`lineTotal`)** entered by the supplier.
+  - **ملاحظة المورد (`supplierNote`)** per item + **ملاحظة المورد العامة (`supplierResponseNote`)**.
+- **Owner Actions on a `quoted` Order:**
+  - **«اعتماد التسعيرة وتأكيد الطلب»**: Owner approves the supplier's quote/modifications (`status: confirmed`).
+  - **«تحميل عرض السعر / أمر الشراء PDF»**: Downloads the formal Arabic PDF including the supplier's prices, availability status, notes, and total amount.
+  - **«التواصل مع المورد عبر واتساب»**: Opens WhatsApp chat with the supplier.
+  - **«إلغاء الطلب»**: Cancels the order if the owner doesn't want to proceed.
+
+---
+
+#### 5.5.4 Updated `OrderModel` & `OrderLineItem` Fields (`lib/features/orders/domain/order_model.dart`)
+- **`OrderStatus` enum**:
+  - `draft` (مسودة)
+  - `sent` (مرسل للمورد — بانتظار الرد)
+  - `quoted` (تم التسعير/التعديل من المورد)
+  - `confirmed` (مؤكد ومعتمد)
+  - `preparing` (قيد التجهيز)
+  - `completed` (مكتمل)
+  - `cancelled` (ملغي)
+- **`OrderLineItem` additions**:
+  - `requestedQty` (`double`): Original quantity requested by the workshop owner from the requirements table.
+  - `qty` (`double`): Quantity the supplier can actually supply (`0` if unavailable, or modified by supplier).
+  - `isAvailable` (`bool`, default `true`): Whether the supplier has this item.
+  - `unitPrice` (`double`): Manual unit price entered by the supplier.
+  - `note` (`String`): Workshop owner's note on the item.
+  - `supplierNote` (`String`): Supplier's note on the item.
+- **`OrderModel` additions**:
+  - `projectId` (`String`) & `projectName` (`String`): Links the order to the source project.
+  - `supplierResponseNote` (`String`): Overall note written by the supplier when sending the quote/response.
+
+---
+
+#### 5.5.5 Security Rules Update (`firestore.rules` via `firestore-rules-author` subagent)
+- In `match /orders/{orderId}`:
+  - Allow the assigned **Supplier (`isSupplier(resource.data.supplierId)`)** when `resource.data.status in ['sent', 'quoted', 'confirmed', 'preparing']` to update:
+    - `items` (to set `isAvailable`, `qty`, `unitPrice`, `supplierNote`),
+    - `totalAmount`,
+    - `supplierResponseNote`,
+    - `status` (to `'quoted'`, `'confirmed'`, `'preparing'`, `'completed'`, or `'cancelled'`),
+    - `statusHistory`, `updatedAt`.
+  - Allow the **Workshop Owner (`isOwnerOf(resource.data.workshopId)`)** when `resource.data.status in ['draft', 'sent', 'quoted']` to update `status` (e.g. `'confirmed'` or `'cancelled'`), `statusHistory`, `updatedAt`.
 
 ---
 

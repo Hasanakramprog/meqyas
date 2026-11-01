@@ -5,6 +5,8 @@ import 'package:meqyas/features/catalog/data/excel_service.dart';
 import 'package:meqyas/features/catalog/domain/catalog_item.dart';
 import 'package:meqyas/features/orders/domain/order_model.dart';
 import 'package:meqyas/features/projects/domain/models/project_unit.dart';
+import 'package:meqyas/features/requirements/data/requirements_service.dart';
+import 'package:meqyas/features/requirements/domain/requirement_line.dart';
 
 void main() {
   group('Phase 6 — Catalog, Excel, Cart Aggregation & Orders Tests', () {
@@ -137,6 +139,124 @@ void main() {
       final uri = order.buildWhatsAppUri('+966 50 000 0001');
       expect(uri.host, equals('wa.me'));
       expect(uri.path, equals('/966500000001'));
+    });
+
+    test('RequirementsService.computeProjectRequirements & safe regeneration merge', () {
+      final engine = CalculatorEngine(
+        rules: SeedRules.getSystem2000BeadedRules(),
+      );
+      const optimizer = CutOptimizer();
+      final catalog = SeedCatalog.getDefaultCatalogItems();
+
+      final unit = ProjectUnit(
+        id: 'u1',
+        projectId: 'p1',
+        name: 'شباك 120×150',
+        location: 'غرفة',
+        widthCm: 120,
+        heightCm: 150,
+        quantity: 1,
+        unitType: 'window',
+        profileSystemId: SeedRules.system2000Beaded,
+        glazingMode: 'single',
+        sharhOption: 'none',
+        sashCount: 2,
+        screenCount: 1,
+        hasScreen: true,
+        rollerType: 'slider',
+        glassType: 'clear',
+        glassThicknessMm: 6.0,
+        hasCorners: true,
+        hasGasket: true,
+        createdAt: DateTime(2026, 1, 1),
+        updatedAt: DateTime(2026, 1, 1),
+      );
+
+      final initialLines = RequirementsService.computeProjectRequirements(
+        units: [unit],
+        engine: engine,
+        optimizer: optimizer,
+        catalogItems: catalog,
+      );
+      expect(initialLines, isNotEmpty);
+
+      // Simulate owner edits:
+      // 1. Enter inStockQty = 1 on 'track' (non-overridden toBuyQty)
+      // 2. Override toBuyQty = 10 on 'glass_handle' (isToBuyOverridden = true)
+      // 3. Dismiss 'water_plug' (dismissed = true)
+      // 4. Add a manual line
+      final editedLines = initialLines.map((line) {
+        if (line.engineItemCode == 'track') {
+          return line.copyWith(
+            inStockQty: 1,
+            toBuyQty: RequirementLine.computeDefaultToBuy(line.requiredQty, 1),
+          );
+        }
+        if (line.engineItemCode == 'glass_handle') {
+          return line.copyWith(
+            toBuyQty: 10,
+            isToBuyOverridden: true,
+          );
+        }
+        if (line.engineItemCode == 'water_plug') {
+          return line.copyWith(dismissed: true);
+        }
+        return line;
+      }).toList()
+        ..add(
+          RequirementLine(
+            id: 'manual_1',
+            nameArabic: 'سيليكون شفاف خارجي',
+            category: 'accessories',
+            requiredQty: 0,
+            inStockQty: 0,
+            toBuyQty: 5,
+            unit: 'piece',
+            source: 'manual',
+            createdAt: DateTime(2026, 1, 1),
+            updatedAt: DateTime(2026, 1, 1),
+          ),
+        );
+
+      // Now project unit quantity increases from 1 -> 3 and owner taps Regenerate
+      final updatedUnit = unit.copyWith(quantity: 3);
+      final freshLines = RequirementsService.computeProjectRequirements(
+        units: [updatedUnit],
+        engine: engine,
+        optimizer: optimizer,
+        catalogItems: catalog,
+      );
+
+      final merged = RequirementsService.mergeRegeneratedLines(
+        existingLines: editedLines,
+        freshAutoLines: freshLines,
+      );
+
+      // 1. 'track' keeps inStockQty = 1 and recomputes toBuyQty = max(newReq - 1, 0)
+      final mergedTrack = merged.firstWhere((l) => l.engineItemCode == 'track');
+      expect(mergedTrack.inStockQty, equals(1));
+      expect(
+        mergedTrack.toBuyQty,
+        equals(RequirementLine.computeDefaultToBuy(mergedTrack.requiredQty, 1)),
+      );
+      expect(mergedTrack.needsReviewAfterRegen, isFalse);
+
+      // 2. 'glass_handle' keeps overridden toBuyQty = 10 and flags needsReviewAfterRegen = true
+      final mergedHandle =
+          merged.firstWhere((l) => l.engineItemCode == 'glass_handle');
+      expect(mergedHandle.toBuyQty, equals(10));
+      expect(mergedHandle.isToBuyOverridden, isTrue);
+      expect(mergedHandle.needsReviewAfterRegen, isTrue);
+
+      // 3. 'water_plug' stays dismissed = true
+      final mergedPlug =
+          merged.firstWhere((l) => l.engineItemCode == 'water_plug');
+      expect(mergedPlug.dismissed, isTrue);
+
+      // 4. Manual line is preserved untouched
+      final mergedManual = merged.firstWhere((l) => l.id == 'manual_1');
+      expect(mergedManual.nameArabic, equals('سيليكون شفاف خارجي'));
+      expect(mergedManual.toBuyQty, equals(5));
     });
   });
 }

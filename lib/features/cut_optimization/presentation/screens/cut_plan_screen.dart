@@ -15,8 +15,6 @@ import '../../../projects/presentation/screens/project_detail_screen.dart';
 import '../../../reports/data/label_generator.dart';
 import '../../../reports/data/pdf_generator.dart';
 import '../../../rules/data/rules_repository.dart';
-import '../../../cart/data/cart_repository.dart';
-import '../../../catalog/data/catalog_repository.dart';
 import '../../data/cut_plan_repository.dart';
 import '../widgets/cut_summary_card.dart';
 import '../widgets/item_group_section.dart';
@@ -101,16 +99,12 @@ class _CutPlanScreenState extends ConsumerState<CutPlanScreen> {
               onPressed: () => context.push('/scanner'),
             ),
             IconButton(
-              icon: const Icon(Icons.add_shopping_cart_rounded, color: AppColors.success),
-              tooltip: 'إضافة المواد المطلوبة إلى سلة التوريد',
-              onPressed: _result == null
-                  ? null
-                  : () => _addProjectMaterialsToCart(
-                        context,
-                        effectiveWorkshopId,
-                        projectAsync.value,
-                        unitsAsync.value ?? const [],
-                      ),
+              icon: const Icon(Icons.fact_check_rounded, color: AppColors.success),
+              tooltip: 'احتياجات المشروع من المواد',
+              onPressed: () => _openProjectRequirements(
+                context,
+                effectiveWorkshopId,
+              ),
             ),
             IconButton(
               icon: const Icon(Icons.layers_rounded),
@@ -457,6 +451,23 @@ class _CutPlanScreenState extends ConsumerState<CutPlanScreen> {
               ),
             ),
             const SizedBox(width: 8),
+            OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppColors.success,
+                side: const BorderSide(color: AppColors.success),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+              icon: const Icon(Icons.fact_check_rounded, size: 18),
+              label: const Text('احتياجات المواد'),
+              onPressed: () {
+                final effectiveWorkshopId = widget.workshopId.isNotEmpty
+                    ? widget.workshopId
+                    : (ref.read(activeWorkshopIdProvider) ?? '');
+                _openProjectRequirements(context, effectiveWorkshopId);
+              },
+            ),
+            const SizedBox(width: 6),
             IconButton.filledTonal(
               tooltip: 'تصدير PDF',
               icon: _isExportingPdf
@@ -880,56 +891,12 @@ class _CutPlanScreenState extends ConsumerState<CutPlanScreen> {
     }
   }
 
-  Future<void> _addProjectMaterialsToCart(
+  void _openProjectRequirements(
     BuildContext context,
     String workshopId,
-    Project? project,
-    List<ProjectUnit> units,
-  ) async {
-    if (units.isEmpty || _result == null) return;
-
-    final engine = ref.read(calculatorEngineProvider(workshopId));
-    final optimizer =
-        ref.read(cuttingOptimizerProvider(workshopId)).value ??
-            const CutOptimizer();
-    final catalogItems = ref.read(activeCatalogItemsProvider).value ?? [];
-
-    final precomputedBars = <String, int>{};
-    for (final bar in _result!.barPlans) {
-      // Only count new 660cm bars needed from supplier (exclude consumed shelf remnants)
-      if (!bar.isFromRemnant) {
-        precomputedBars[bar.itemCode] =
-            (precomputedBars[bar.itemCode] ?? 0) + 1;
-      }
-    }
-
-    final items = CartRepository.aggregateFromProject(
-      projectId: widget.projectId,
-      projectName: project?.name ?? 'مشروع',
-      units: units,
-      engine: engine,
-      optimizer: optimizer,
-      catalogItems: catalogItems,
-      precomputedBarsByItemCode: precomputedBars,
+  ) {
+    context.push(
+      '/dashboard/owner/projects/${widget.projectId}/requirements?workshopId=$workshopId',
     );
-
-    final count = await ref.read(cartRepositoryProvider).upsertProjectCartItems(
-          workshopId: workshopId,
-          items: items,
-        );
-
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('تمت إضافة/تحديث $count بند في سلة الاحتياجات بنجاح'),
-          action: SnackBarAction(
-            label: 'فتح السلة',
-            onPressed: () => context.push(
-              '/dashboard/owner/cart?workshopId=$workshopId',
-            ),
-          ),
-        ),
-      );
-    }
   }
 }
