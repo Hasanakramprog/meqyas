@@ -72,7 +72,6 @@ class OrdersRepository {
   }
 
   /// Creates an order in `draft` or `sent` status.
-  /// CRITICAL (Spec §0.4, §11, §15): Never deducts stock here!
   Future<String> createOrder({
     required String workshopId,
     required String workshopName,
@@ -81,16 +80,12 @@ class OrdersRepository {
     required String supplierId,
     required String supplierName,
     required List<OrderLineItem> items,
+    String projectId = '',
+    String projectName = '',
     String notes = '',
     OrderStatus initialStatus = OrderStatus.sent,
     String? actorUid,
   }) async {
-    if (initialStatus == OrderStatus.confirmed) {
-      throw ArgumentError(
-        'لا يمكن إنشاء طلب بحالة مؤكد مباشرة؛ التأكيد يتم حصرياً عبر الدالة السحابية confirmOrder',
-      );
-    }
-
     final docRef = _col.doc();
     final now = FieldValue.serverTimestamp();
     final nowIso = DateTime.now().toIso8601String();
@@ -107,6 +102,8 @@ class OrdersRepository {
       workshopLocation: workshopLocation,
       supplierId: supplierId,
       supplierName: supplierName,
+      projectId: projectId,
+      projectName: projectName,
       status: initialStatus,
       items: items,
       notes: notes,
@@ -117,7 +114,7 @@ class OrdersRepository {
           changedBy: actorUid ?? '',
           changedAt: nowIso,
           note: initialStatus == OrderStatus.sent
-              ? 'تم إنشاء الطلب وإرساله للمورد'
+              ? 'تم إرسال طلب التوريد والتسعير من الورشة إلى المورد'
               : 'تم حفظ الطلب كمسودة',
         ),
       ],
@@ -132,7 +129,7 @@ class OrdersRepository {
     return docRef.id;
   }
 
-  /// Updates a `draft` order or sends it (`draft` -> `sent`). Never touches stock.
+  /// Updates a `draft` order or sends it (`draft` -> `sent`).
   Future<void> sendDraftOrder(String orderId, {String? actorUid}) async {
     final docRef = _col.doc(orderId);
     final snap = await docRef.get();
@@ -156,10 +153,82 @@ class OrdersRepository {
     });
   }
 
-  /// Calls the transactional `confirmOrder` Cloud Function (Core Phase 6 DoD).
-  /// - Deducts stock atomically once.
-  /// - Retrying with the same `idempotencyKey` never double-deducts.
-  /// - Insufficient stock aborts completely without partial deductions.
+  /// Supplier submits modified items (availability, supplied quantities, manual unit prices, item notes)
+  /// and general response note back to the workshop owner (`status` -> `quoted`).
+  Future<void> submitSupplierQuote({
+    required String orderId,
+    required List<OrderLineItem> updatedItems,
+    required String supplierResponseNote,
+    String? actorUid,
+  }) async {
+    final docRef = _col.doc(orderId);
+    final snap = await docRef.get();
+    if (!snap.exists) return;
+
+    final order = OrderModel.fromMap(snap.data()!, docId: snap.id);
+    final total = updatedItems.fold<double>(
+      0.0,
+      (acc, item) => acc + item.lineTotal,
+    );
+    final availableCount =
+        updatedItems.where((i) => i.isAvailable && i.qty > 0).length;
+    final unavailableCount = updatedItems.length - availableCount;
+
+    final summaryNote = unavailableCount > 0
+        ? 'رد المورد بالتسعيرة ($availableCount صنف متوفر، $unavailableCount غير متوفر) — الإجمالي: ${total.toStringAsFixed(2)} ${order.currency}'
+        : 'رد المورد بقبول وتسعير جميع الأصناف ($availableCount صنف) — الإجمالي: ${total.toStringAsFixed(2)} ${order.currency}';
+
+    final updatedHistory = [
+      ...order.statusHistory.map((h) => h.toMap()),
+      OrderStatusHistoryEntry(
+        status: OrderStatus.quoted.name,
+        changedBy: actorUid ?? '',
+        changedAt: DateTime.now().toIso8601String(),
+        note: summaryNote,
+      ).toMap(),
+    ];
+
+    await docRef.update({
+      'items': updatedItems.map((i) => i.toMap()).toList(),
+      'totalAmount': total,
+      'supplierResponseNote': supplierResponseNote.trim(),
+      'status': OrderStatus.quoted.name,
+      'statusHistory': updatedHistory,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  /// Workshop Owner (or Supplier) approves/confirms the order.
+  Future<void> approveOrder({
+    required String orderId,
+    String? actorUid,
+    String note = 'تم اعتماد التسعيرة وتأكيد الطلب',
+  }) async {
+    final docRef = _col.doc(orderId);
+    final snap = await docRef.get();
+    if (!snap.exists) return;
+
+    final order = OrderModel.fromMap(snap.data()!, docId: snap.id);
+    final updatedHistory = [
+      ...order.statusHistory.map((h) => h.toMap()),
+      OrderStatusHistoryEntry(
+        status: OrderStatus.confirmed.name,
+        changedBy: actorUid ?? '',
+        changedAt: DateTime.now().toIso8601String(),
+        note: note,
+      ).toMap(),
+    ];
+
+    await docRef.update({
+      'status': OrderStatus.confirmed.name,
+      'confirmedBy': actorUid ?? '',
+      'confirmedAt': FieldValue.serverTimestamp(),
+      'statusHistory': updatedHistory,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  /// Calls the transactional `confirmOrder` Cloud Function if needed.
   Future<Map<String, dynamic>> confirmOrder({
     required String orderId,
     required String idempotencyKey,
@@ -174,17 +243,34 @@ class OrdersRepository {
     return Map<String, dynamic>.from(response.data as Map);
   }
 
-  /// Transitions order status via the server-side `updateOrderStatus` Cloud Function.
+  /// Updates order status (`preparing`, `completed`, `cancelled`, etc.).
   Future<void> updateOrderStatus({
     required String orderId,
     required OrderStatus newStatus,
     String note = '',
+    String? actorUid,
   }) async {
-    final callable = _functions.httpsCallable('updateOrderStatus');
-    await callable.call({
-      'orderId': orderId,
-      'newStatus': newStatus.name,
-      'note': note,
+    final docRef = _col.doc(orderId);
+    final snap = await docRef.get();
+    if (!snap.exists) return;
+
+    final order = OrderModel.fromMap(snap.data()!, docId: snap.id);
+    final updatedHistory = [
+      ...order.statusHistory.map((h) => h.toMap()),
+      OrderStatusHistoryEntry(
+        status: newStatus.name,
+        changedBy: actorUid ?? '',
+        changedAt: DateTime.now().toIso8601String(),
+        note: note.isNotEmpty
+            ? note
+            : 'تحديث الحالة إلى: ${newStatus.arabicLabel}',
+      ).toMap(),
+    ];
+
+    await docRef.update({
+      'status': newStatus.name,
+      'statusHistory': updatedHistory,
+      'updatedAt': FieldValue.serverTimestamp(),
     });
   }
 }
@@ -216,4 +302,3 @@ final orderDetailProvider =
   final repo = ref.watch(ordersRepositoryProvider);
   return repo.watchOrderById(orderId);
 });
-

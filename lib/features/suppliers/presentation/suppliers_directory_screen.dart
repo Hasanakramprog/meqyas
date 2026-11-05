@@ -4,9 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../app/theme/app_colors.dart';
-import '../../catalog/data/catalog_repository.dart';
-import '../../inventory/data/inventory_repository.dart';
-import '../../pricing/data/pricing_repository.dart';
 import '../data/suppliers_repository.dart';
 
 class SuppliersDirectoryScreen extends ConsumerWidget {
@@ -15,12 +12,12 @@ class SuppliersDirectoryScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final suppliersAsync = ref.watch(suppliersListProvider);
-    final catalogItems = ref.watch(activeCatalogItemsProvider).value ?? [];
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('دليل الموردين وقوائم الأسعار'),
+        title: const Text('دليل الموردين المعتمدين'),
         actions: [
           IconButton(
             tooltip: 'تسجيل الخروج',
@@ -46,13 +43,15 @@ class SuppliersDirectoryScreen extends ConsumerWidget {
             itemCount: suppliers.length,
             itemBuilder: (context, index) {
               final supplier = suppliers[index];
-              final pricesMap =
-                  ref.watch(supplierPricesProvider(supplier.id)).value ?? {};
-              final stockMap =
-                  ref.watch(supplierStockProvider(supplier.id)).value ?? {};
 
               return Card(
-                margin: const EdgeInsets.only(bottom: 16),
+                margin: const EdgeInsets.only(bottom: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  side: BorderSide(
+                    color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+                  ),
+                ),
                 child: Padding(
                   padding: const EdgeInsets.all(16),
                   child: Column(
@@ -66,12 +65,12 @@ class SuppliersDirectoryScreen extends ConsumerWidget {
                               color: AppColors.amberPrimary.withValues(
                                 alpha: 0.14,
                               ),
-                              borderRadius: BorderRadius.circular(12),
+                              borderRadius: BorderRadius.circular(10),
                             ),
                             child: const Icon(
                               Icons.storefront_rounded,
-                              color: AppColors.amberPrimary,
-                              size: 26,
+                              color: AppColors.amberLight,
+                              size: 24,
                             ),
                           ),
                           const SizedBox(width: 14),
@@ -82,17 +81,31 @@ class SuppliersDirectoryScreen extends ConsumerWidget {
                                 Text(
                                   supplier.name,
                                   style: theme.textTheme.titleMedium?.copyWith(
-                                    fontWeight: FontWeight.bold,
+                                    fontWeight: FontWeight.w800,
                                   ),
                                 ),
-                                if (supplier.address.isNotEmpty)
-                                  Text(
-                                    supplier.address,
-                                    style: const TextStyle(
-                                      fontSize: 12,
-                                      color: AppColors.slate400,
-                                    ),
+                                if (supplier.address.isNotEmpty) ...[
+                                  const SizedBox(height: 4),
+                                  Row(
+                                    children: [
+                                      const Icon(
+                                        Icons.place_outlined,
+                                        size: 14,
+                                        color: AppColors.slate400,
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Expanded(
+                                        child: Text(
+                                          supplier.address,
+                                          style: const TextStyle(
+                                            fontSize: 12,
+                                            color: AppColors.slate400,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
                                   ),
+                                ],
                               ],
                             ),
                           ),
@@ -115,54 +128,6 @@ class SuppliersDirectoryScreen extends ConsumerWidget {
                             ),
                         ],
                       ),
-                      if (pricesMap.isNotEmpty || stockMap.isNotEmpty) ...[
-                        const Divider(height: 24),
-                        const Text(
-                          'أسعار وتوفر الأصناف لدى المورد:',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 13,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: catalogItems
-                              .where(
-                                (c) =>
-                                    pricesMap.containsKey(c.id) ||
-                                    stockMap.containsKey(c.id),
-                              )
-                              .take(12)
-                              .map((cat) {
-                            final price = pricesMap[cat.id];
-                            final stock = stockMap[cat.id];
-                            final priceText = price != null
-                                ? '${price.price.toStringAsFixed(1)} ${price.currency}'
-                                : 'غير مسعر';
-                            final stockText = stock != null
-                                ? 'متوفر: ${stock.balance.toInt()}'
-                                : '';
-                            return Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 6,
-                              ),
-                              decoration: BoxDecoration(
-                                color: AppColors.slate700.withValues(
-                                  alpha: 0.12,
-                                ),
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: Text(
-                                '${cat.arabicName}: $priceText ${stockText.isNotEmpty ? "($stockText)" : ""}',
-                                style: const TextStyle(fontSize: 12),
-                              ),
-                            );
-                          }).toList(),
-                        ),
-                      ],
                     ],
                   ),
                 ),

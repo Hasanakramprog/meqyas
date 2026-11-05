@@ -5,6 +5,8 @@ import 'package:go_router/go_router.dart';
 
 import '../../../app/theme/app_colors.dart';
 import '../../auth/presentation/controllers/auth_controller.dart';
+import '../../orders/data/orders_repository.dart';
+import '../../orders/domain/order_model.dart';
 import '../../projects/data/projects_repository.dart';
 import '../../projects/domain/models/project.dart';
 import '../../rules/data/rules_repository.dart';
@@ -18,6 +20,7 @@ class OwnerDashboardScreen extends ConsumerStatefulWidget {
 }
 
 class _OwnerDashboardScreenState extends ConsumerState<OwnerDashboardScreen> {
+  int _selectedTabIndex = 0; // 0: المشاريع, 1: التوريد والموردين, 2: أدوات الورشة
   String _searchQuery = '';
 
   @override
@@ -46,890 +49,1547 @@ class _OwnerDashboardScreenState extends ConsumerState<OwnerDashboardScreen> {
     );
 
     final projectsAsync = ref.watch(workshopProjectsProvider(activeWorkshopId));
+    final ordersAsync = ref.watch(workshopOrdersProvider(activeWorkshopId));
+    final projectsList = projectsAsync.value ?? [];
+    final ordersList = ordersAsync.value ?? [];
 
-    return Scaffold(
-      appBar: AppBar(
-        title: workshops.length > 1
-            ? DropdownButtonHideUnderline(
-                child: DropdownButton<String>(
-                  value: workshops.any((w) => w.id == activeWorkshopId)
-                      ? activeWorkshopId
-                      : workshops.first.id,
-                  icon: const Icon(
-                    Icons.arrow_drop_down_rounded,
-                    color: AppColors.amberPrimary,
-                  ),
-                  dropdownColor: isDark
-                      ? AppColors.darkCard
-                      : AppColors.lightSurface,
-                  items: workshops.map((w) {
-                    return DropdownMenuItem(
-                      value: w.id,
-                      child: Text(
-                        w.name,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16,
-                        ),
-                      ),
-                    );
-                  }).toList(),
-                  onChanged: (newId) {
-                    if (newId != null) {
-                      ref
-                          .read(activeWorkshopIdProvider.notifier)
-                          .setWorkshopId(newId);
-                    }
-                  },
-                ),
-              )
-            : Text(
-                activeWorkshop.name.isNotEmpty
-                    ? activeWorkshop.name
-                    : 'لوحة إدارة الورشة',
-              ),
-        leading: IconButton(
-          tooltip: 'الرئيسية',
-          icon: const Icon(Icons.home_rounded),
-          onPressed: () => context.go('/'),
-        ),
-        actions: [
-          IconButton(
-            tooltip: 'إضافة ورشة جديدة',
-            icon: const Icon(
-              Icons.add_home_work_rounded,
-              color: AppColors.amberPrimary,
-            ),
-            onPressed: () => _showNewWorkshopDialog(context),
-          ),
-          IconButton(
-            tooltip: 'ماسح قطع الألمنيوم QR',
-            icon: const Icon(
-              Icons.qr_code_scanner_rounded,
-              color: AppColors.amberPrimary,
-            ),
-            onPressed: () => context.push('/scanner'),
-          ),
-          IconButton(
-            tooltip: 'إعدادات المنشار والقواعد',
-            icon: const Icon(Icons.tune_rounded, color: AppColors.amberPrimary),
-            onPressed: () {
-              context.push(
-                '/dashboard/owner/rules?workshopId=$activeWorkshopId',
-              );
-            },
-          ),
-          IconButton(
-            tooltip: 'تسجيل الخروج',
-            icon: const Icon(Icons.logout_rounded),
-            onPressed: () async {
-              await FirebaseAuth.instance.signOut();
-              if (context.mounted) context.go('/auth/login');
-            },
-          ),
-          const SizedBox(width: 8),
-        ],
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 1000),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                // 1. Dynamic Workshop Info Banner
-                _buildWorkshopBanner(
-                  context,
-                  activeWorkshop,
-                  workshops,
-                  isDark,
-                ),
-                const SizedBox(height: 20),
-
-                // 2. Real Live Metrics (KPIs)
-                projectsAsync.when(
-                  data: (projects) =>
-                      _buildMetricsCards(context, projects, isDark),
-                  loading: () => const LinearProgressIndicator(),
-                  error: (err, stack) => const SizedBox.shrink(),
-                ),
-                const SizedBox(height: 24),
-
-                // 3. Quick Operation Actions
-                _buildQuickActions(context, activeWorkshopId, isDark),
-                const SizedBox(height: 32),
-
-                // 4. View All Projects Section
-                _buildProjectsSectionHeader(
-                  context,
-                  activeWorkshopId,
-                  projectsAsync,
-                ),
-                const SizedBox(height: 12),
-
-                // Projects Search Field
-                TextField(
-                  decoration: InputDecoration(
-                    hintText: 'البحث في المشاريع بالاسم، العميل، الهاتف، أو الموقع...',
-                    prefixIcon: const Icon(Icons.search_rounded),
-                    suffixIcon: _searchQuery.isNotEmpty
-                        ? IconButton(
-                            icon: const Icon(Icons.clear_rounded),
-                            onPressed: () => setState(() => _searchQuery = ''),
-                          )
-                        : null,
-                    filled: true,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide.none,
-                    ),
-                  ),
-                  onChanged: (val) =>
-                      setState(() => _searchQuery = val.trim().toLowerCase()),
-                ),
-                const SizedBox(height: 16),
-
-                // 5. Projects Live List / Cards
-                projectsAsync.when(
-                  data: (projects) => _buildProjectsList(
-                    context,
-                    projects,
-                    activeWorkshopId,
-                    isDark,
-                  ),
-                  loading: () => const Center(
-                    child: Padding(
-                      padding: EdgeInsets.all(40),
-                      child: CircularProgressIndicator(),
-                    ),
-                  ),
-                  error: (err, _) => Container(
-                    padding: const EdgeInsets.all(20),
-                    decoration: BoxDecoration(
-                      color: AppColors.error.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Text(
-                      'حدث خطأ أثناء تحميل المشاريع: $err',
-                      style: const TextStyle(color: AppColors.error),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 40),
-              ],
-            ),
-          ),
-        ),
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        icon: const Icon(Icons.add_business_rounded),
-        label: const Text('مشروع جديد'),
-        onPressed: () => _showNewProjectDialog(context, activeWorkshopId),
-      ),
-    );
-  }
-
-  Widget _buildWorkshopBanner(
-    BuildContext context,
-    WorkshopInfo activeWorkshop,
-    List<WorkshopInfo> workshops,
-    bool isDark,
-  ) {
-    final theme = Theme.of(context);
-    final currentUser = ref.watch(currentUserProvider).value;
-
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: isDark ? AppColors.darkCard : AppColors.lightSurface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.04),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: AppColors.amberPrimary.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: const Icon(
-                  Icons.storefront_rounded,
-                  color: AppColors.amberPrimary,
-                  size: 30,
-                ),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Wrap(
-                      alignment: WrapAlignment.spaceBetween,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      spacing: 8,
-                      runSpacing: 4,
-                      children: [
-                        Text(
-                          activeWorkshop.name,
-                          style: theme.textTheme.titleLarge?.copyWith(
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 4,
-                          ),
-                          decoration: BoxDecoration(
-                            color: AppColors.success.withValues(alpha: 0.15),
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: const Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                Icons.check_circle_rounded,
-                                size: 14,
-                                color: AppColors.success,
-                              ),
-                              SizedBox(width: 4),
-                              Text(
-                                'الورشة النشطة',
-                                style: TextStyle(
-                                  color: AppColors.success,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 6),
-                    Wrap(
-                      spacing: 16,
-                      runSpacing: 4,
-                      children: [
-                        if (currentUser?.fullName != null &&
-                            currentUser!.fullName.isNotEmpty)
-                          Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(
-                                Icons.person_outline_rounded,
-                                size: 15,
-                                color: AppColors.slate400,
-                              ),
-                              const SizedBox(width: 4),
-                              Text(
-                                'صاحب الورشة: ${currentUser.fullName}',
-                                style: theme.textTheme.bodySmall?.copyWith(
-                                  color: AppColors.slate400,
-                                ),
-                              ),
-                            ],
-                          ),
-                        if (activeWorkshop.location.isNotEmpty)
-                          Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(
-                                Icons.location_on_outlined,
-                                size: 15,
-                                color: AppColors.slate400,
-                              ),
-                              const SizedBox(width: 4),
-                              Text(
-                                activeWorkshop.location,
-                                style: theme.textTheme.bodySmall?.copyWith(
-                                  color: AppColors.slate400,
-                                ),
-                              ),
-                            ],
-                          ),
-                        if (activeWorkshop.phone.isNotEmpty)
-                          Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(
-                                Icons.phone_outlined,
-                                size: 15,
-                                color: AppColors.slate400,
-                              ),
-                              const SizedBox(width: 4),
-                              Text(
-                                activeWorkshop.phone,
-                                style: theme.textTheme.bodySmall?.copyWith(
-                                  color: AppColors.slate400,
-                                ),
-                              ),
-                            ],
-                          ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-
-          // Workshop Switcher Chips if multiple workshops exist
-          if (workshops.length > 1) ...[
-            const SizedBox(height: 16),
-            const Divider(height: 1),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                const Icon(
-                  Icons.swap_horiz_rounded,
-                  size: 18,
-                  color: AppColors.amberPrimary,
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  'التبديل بين ورشك (${workshops.length}):',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: workshops.map((w) {
-                final isSelected = w.id == activeWorkshop.id;
-                return ChoiceChip(
-                  label: Text(w.name),
-                  selected: isSelected,
-                  selectedColor: AppColors.amberPrimary.withValues(alpha: 0.2),
-                  onSelected: (selected) {
-                    if (selected) {
-                      ref
-                          .read(activeWorkshopIdProvider.notifier)
-                          .setWorkshopId(w.id);
-                    }
-                  },
-                );
-              }).toList(),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _buildMetricsCards(
-    BuildContext context,
-    List<Project> projects,
-    bool isDark,
-  ) {
-    final totalUnits = projects.fold<int>(0, (sum, p) => sum + p.unitCount);
-    final activeClients = projects
+    final totalUnits = projectsList.fold<int>(0, (sum, p) => sum + p.unitCount);
+    final activeClients = projectsList
         .map((p) => p.clientName)
         .where((n) => n.isNotEmpty)
         .toSet()
         .length;
+    final quotedOrdersCount = ordersList
+        .where((o) => o.status == OrderStatus.quoted)
+        .length;
 
-    final metrics = [
-      {
-        'title': 'إجمالي المشاريع',
-        'value': '${projects.length}',
-        'icon': Icons.business_center_rounded,
-        'color': AppColors.amberPrimary,
-        'subtitle': 'مشاريع مسجلة بالورشة',
-      },
-      {
-        'title': 'وحدات وشبابيك القياس',
-        'value': '$totalUnits',
-        'icon': Icons.window_rounded,
-        'color': AppColors.glassBlue,
-        'subtitle': 'إجمالي عناصر القياس',
-      },
-      {
-        'title': 'العملاء النشطين',
-        'value': '$activeClients',
-        'icon': Icons.people_alt_rounded,
-        'color': AppColors.success,
-        'subtitle': 'عملاء متعامل معهم',
-      },
-    ];
-
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final isMobile = constraints.maxWidth < 650;
-        return GridView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          itemCount: metrics.length,
-          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: isMobile ? 1 : 3,
-            mainAxisSpacing: 12,
-            crossAxisSpacing: 12,
-            childAspectRatio: isMobile ? 3.0 : 1.7,
+    return Scaffold(
+      backgroundColor: isDark
+          ? AppColors.darkBackground
+          : AppColors.lightBackground,
+      appBar: _buildCompactUnifiedHeader(
+        context: context,
+        theme: theme,
+        isDark: isDark,
+        activeWorkshop: activeWorkshop,
+        activeWorkshopId: activeWorkshopId,
+        workshops: workshops,
+        projectsCount: projectsList.length,
+        totalUnits: totalUnits,
+        activeClients: activeClients,
+        ownerName: currentUser?.fullName ?? '',
+      ),
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Top Segmented Workspace Tabs + Quick Pill Dock (No vertical stacking!)
+          _buildWorkspaceNavAndQuickDock(
+            context: context,
+            isDark: isDark,
+            activeWorkshopId: activeWorkshopId,
+            projectsCount: projectsList.length,
+            ordersCount: ordersList.length,
+            quotedOrdersCount: quotedOrdersCount,
           ),
-          itemBuilder: (context, index) {
-            final m = metrics[index];
-            final color = m['color'] as Color;
-            return Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: isDark ? AppColors.darkCard : AppColors.lightSurface,
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(
-                  color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+
+          // Main Workspace View (Switches cleanly in-place by tab)
+          Expanded(
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 1280),
+                child: IndexedStack(
+                  index: _selectedTabIndex,
+                  children: [
+                    // Tab 0: المشاريع والقياسات (Compact Grid View)
+                    _buildProjectsTabWorkspace(
+                      context: context,
+                      projectsAsync: projectsAsync,
+                      activeWorkshopId: activeWorkshopId,
+                      isDark: isDark,
+                      totalUnits: totalUnits,
+                      activeClients: activeClients,
+                    ),
+
+                    // Tab 1: التوريد والموردين (Side-by-Side Procurement Hub)
+                    _buildSupplyAndSuppliersTabWorkspace(
+                      context: context,
+                      ordersAsync: ordersAsync,
+                      activeWorkshopId: activeWorkshopId,
+                      isDark: isDark,
+                    ),
+
+                    // Tab 2: أدوات وإعدادات الورشة (2x2 Tools Grid + Branches)
+                    _buildWorkshopToolsTabWorkspace(
+                      context: context,
+                      activeWorkshop: activeWorkshop,
+                      activeWorkshopId: activeWorkshopId,
+                      workshops: workshops,
+                      isDark: isDark,
+                    ),
+                  ],
                 ),
               ),
-              child: Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: color.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+
+          // Slim Technical Status Footer Bar
+          _buildCompactStatusBar(
+            activeWorkshop: activeWorkshop,
+            workshopsCount: workshops.length,
+            isDark: isDark,
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 1. Unified Compact Header + Inline KPI Strip (<= 68px)
+  PreferredSizeWidget _buildCompactUnifiedHeader({
+    required BuildContext context,
+    required ThemeData theme,
+    required bool isDark,
+    required WorkshopInfo activeWorkshop,
+    required String activeWorkshopId,
+    required List<WorkshopInfo> workshops,
+    required int projectsCount,
+    required int totalUnits,
+    required int activeClients,
+    required String ownerName,
+  }) {
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final showInlineKpis = screenWidth >= 820;
+
+    return PreferredSize(
+      preferredSize: const Size.fromHeight(64),
+      child: Container(
+        decoration: BoxDecoration(
+          color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
+          border: Border(
+            bottom: BorderSide(
+              color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+            ),
+          ),
+        ),
+        child: SafeArea(
+          bottom: false,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+            child: Row(
+              children: [
+                // Right (RTL start): Brand + Workshop Switcher
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: AppColors.amberPrimary.withValues(alpha: 0.14),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: AppColors.amberPrimary.withValues(alpha: 0.4),
                     ),
-                    child: Icon(m['icon'] as IconData, color: color, size: 28),
                   ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text(
-                          m['value'] as String,
-                          style: Theme.of(context).textTheme.headlineSmall
-                              ?.copyWith(
-                                fontWeight: FontWeight.w800,
-                                color: color,
-                              ),
+                  child: const Icon(
+                    Icons.straighten_rounded,
+                    color: AppColors.amberLight,
+                    size: 20,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Row(
+                    children: [
+                      const Text(
+                        'مِقْيَاس',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w900,
+                          fontSize: 16,
+                          color: AppColors.amberLight,
                         ),
-                        const SizedBox(height: 2),
-                        Text(
-                          m['title'] as String,
-                          style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 13,
+                      ),
+                      const SizedBox(width: 6),
+                      Flexible(
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: isDark
+                                ? AppColors.darkCard
+                                : AppColors.lightCard,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: isDark
+                                  ? AppColors.darkBorder
+                                  : AppColors.lightBorder,
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Container(
+                                width: 7,
+                                height: 7,
+                                decoration: const BoxDecoration(
+                                  color: AppColors.success,
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              Flexible(
+                                child: workshops.length > 1
+                                    ? DropdownButtonHideUnderline(
+                                        child: DropdownButton<String>(
+                                          isDense: true,
+                                          isExpanded: true,
+                                          value: workshops.any(
+                                                (w) =>
+                                                    w.id == activeWorkshopId,
+                                              )
+                                              ? activeWorkshopId
+                                              : workshops.first.id,
+                                          icon: const Icon(
+                                            Icons.keyboard_arrow_down_rounded,
+                                            color: AppColors.amberLight,
+                                            size: 18,
+                                          ),
+                                          dropdownColor: isDark
+                                              ? AppColors.darkCard
+                                              : AppColors.lightSurface,
+                                          items: workshops.map((w) {
+                                            return DropdownMenuItem(
+                                              value: w.id,
+                                              child: Text(
+                                                w.name,
+                                                overflow: TextOverflow.ellipsis,
+                                                maxLines: 1,
+                                                style: const TextStyle(
+                                                  fontWeight: FontWeight.w700,
+                                                  fontSize: 13,
+                                                ),
+                                              ),
+                                            );
+                                          }).toList(),
+                                          onChanged: (newId) {
+                                            if (newId != null) {
+                                              ref
+                                                  .read(
+                                                    activeWorkshopIdProvider
+                                                        .notifier,
+                                                  )
+                                                  .setWorkshopId(newId);
+                                            }
+                                          },
+                                        ),
+                                      )
+                                    : Text(
+                                        activeWorkshop.name.isNotEmpty
+                                            ? activeWorkshop.name
+                                            : 'لوحة إدارة الورشة',
+                                        overflow: TextOverflow.ellipsis,
+                                        maxLines: 1,
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                          fontSize: 13,
+                                        ),
+                                      ),
+                              ),
+                              const SizedBox(width: 4),
+                              InkWell(
+                                onTap: () => _showNewWorkshopDialog(context),
+                                borderRadius: BorderRadius.circular(4),
+                                child: const Tooltip(
+                                  message: 'إضافة ورشة جديدة',
+                                  child: Padding(
+                                    padding: EdgeInsets.all(2),
+                                    child: Icon(
+                                      Icons.add_circle_outline_rounded,
+                                      size: 16,
+                                      color: AppColors.amberLight,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                // Center: 3 Inline KPI Pills side-by-side (on wide screens)
+                if (showInlineKpis) ...[
+                  const Spacer(),
+                  _buildInlineKpiPill(
+                    icon: Icons.folder_copy_outlined,
+                    label: 'المشاريع',
+                    value: '$projectsCount',
+                    color: AppColors.amberLight,
+                    isDark: isDark,
+                  ),
+                  const SizedBox(width: 8),
+                  _buildInlineKpiPill(
+                    icon: Icons.window_rounded,
+                    label: 'وحدات القياس',
+                    value: '$totalUnits',
+                    color: AppColors.glassBlueLight,
+                    isDark: isDark,
+                  ),
+                  const SizedBox(width: 8),
+                  _buildInlineKpiPill(
+                    icon: Icons.people_alt_outlined,
+                    label: 'العملاء',
+                    value: '$activeClients',
+                    color: AppColors.success,
+                    isDark: isDark,
+                  ),
+                  const Spacer(),
+                ] else
+                  const SizedBox(width: 6),
+
+                // Left (RTL end): Direct Hardware Action Buttons
+                _buildTopActionButton(
+                  tooltip: 'ماسح قطع الألمنيوم QR',
+                  icon: Icons.qr_code_scanner_rounded,
+                  label: screenWidth >= 600 ? 'ماسح QR' : null,
+                  color: AppColors.glassBlueLight,
+                  isDark: isDark,
+                  onTap: () => context.push('/scanner'),
+                ),
+                const SizedBox(width: 6),
+                _buildTopActionButton(
+                  tooltip: 'قواعد المنشار (660 سم)',
+                  icon: Icons.tune_rounded,
+                  label: screenWidth >= 600 ? 'القواعد' : null,
+                  color: AppColors.amberLight,
+                  isDark: isDark,
+                  onTap: () => context.push(
+                    '/dashboard/owner/rules?workshopId=$activeWorkshopId',
+                  ),
+                ),
+                if (ownerName.isNotEmpty && screenWidth >= 980) ...[
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: isDark ? AppColors.darkCard : AppColors.lightCard,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(
+                          Icons.engineering_outlined,
+                          size: 15,
+                          color: AppColors.slate400,
+                        ),
+                        const SizedBox(width: 6),
                         Text(
-                          m['subtitle'] as String,
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: isDark
-                                ? AppColors.slate400
-                                : AppColors.slate600,
+                          ownerName,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
                           ),
                         ),
                       ],
                     ),
                   ),
                 ],
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-
-  Widget _buildQuickActions(
-    BuildContext context,
-    String activeWorkshopId,
-    bool isDark,
-  ) {
-    final actions = [
-      {
-        'title': 'مشروع جديد',
-        'desc': 'فتح مشروع وتسجيل بيانات العميل والقياسات',
-        'icon': Icons.add_business_rounded,
-        'color': AppColors.amberPrimary,
-        'onTap': () => _showNewProjectDialog(context, activeWorkshopId),
-      },
-      {
-        'title': 'سلة الاحتياجات والتوريد',
-        'desc': 'تجميع قضبان الألمنيوم والزجاج والإكسسوارات وطلبها',
-        'icon': Icons.shopping_cart_checkout_rounded,
-        'color': AppColors.success,
-        'onTap': () =>
-            context.push('/dashboard/owner/cart?workshopId=$activeWorkshopId'),
-      },
-      {
-        'title': 'طلبات التوريد والموردين',
-        'desc': 'متابعة أوامر الشراء والـ PDF والواتساب ودليل الموردين',
-        'icon': Icons.local_shipping_outlined,
-        'color': AppColors.glassBlueLight,
-        'onTap': () => context.push(
-          '/dashboard/owner/orders?workshopId=$activeWorkshopId',
-        ),
-      },
-      {
-        'title': 'دليل الموردين والأسعار',
-        'desc': 'استعراض الموردين المعتمدين وأسعار وتوفر المواد',
-        'icon': Icons.storefront_rounded,
-        'color': AppColors.glassBlue,
-        'onTap': () => context.push('/dashboard/owner/suppliers'),
-      },
-      {
-        'title': 'قواعد ومعايير الورشة',
-        'desc': 'تخصيص معادلات التقطيع وإعدادات منشار 660سم',
-        'icon': Icons.tune_rounded,
-        'color': AppColors.amberPrimary,
-        'onTap': () =>
-            context.push('/dashboard/owner/rules?workshopId=$activeWorkshopId'),
-      },
-      {
-        'title': 'إضافة ورشة عمل',
-        'desc': 'تسجيل ورشة إضافية تحت إدارتك والتبديل بينها',
-        'icon': Icons.add_home_work_rounded,
-        'color': AppColors.glassBlue,
-        'onTap': () => _showNewWorkshopDialog(context),
-      },
-    ];
-
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final isMobile = constraints.maxWidth < 650;
-        return GridView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          itemCount: actions.length,
-          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: isMobile ? 1 : 3,
-            mainAxisSpacing: 12,
-            crossAxisSpacing: 12,
-            childAspectRatio: isMobile ? 3.0 : 2.0,
-          ),
-          itemBuilder: (context, index) {
-            final a = actions[index];
-            final color = a['color'] as Color;
-            return Card(
-              elevation: 0,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(14),
-                side: BorderSide(
-                  color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
-                ),
-              ),
-              child: InkWell(
-                borderRadius: BorderRadius.circular(14),
-                onTap: a['onTap'] as VoidCallback,
-                child: Padding(
-                  padding: const EdgeInsets.all(14),
-                  child: Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          color: color.withValues(alpha: 0.12),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Icon(
-                          a['icon'] as IconData,
-                          color: color,
-                          size: 22,
-                        ),
+                const SizedBox(width: 6),
+                IconButton(
+                  tooltip: 'تسجيل الخروج',
+                  visualDensity: VisualDensity.compact,
+                  style: IconButton.styleFrom(
+                    backgroundColor: AppColors.error.withValues(alpha: 0.12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      side: BorderSide(
+                        color: AppColors.error.withValues(alpha: 0.35),
                       ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Text(
-                              a['title'] as String,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 14,
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              a['desc'] as String,
-                              style: TextStyle(
-                                fontSize: 11,
-                                color: isDark
-                                    ? AppColors.slate400
-                                    : AppColors.slate600,
-                              ),
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
+                  icon: const Icon(
+                    Icons.logout_rounded,
+                    color: AppColors.error,
+                    size: 18,
+                  ),
+                  onPressed: () async {
+                    await FirebaseAuth.instance.signOut();
+                    if (context.mounted) context.go('/auth/login');
+                  },
                 ),
-              ),
-            );
-          },
-        );
-      },
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 
-  Widget _buildProjectsSectionHeader(
-    BuildContext context,
-    String activeWorkshopId,
-    AsyncValue<List<Project>> projectsAsync,
-  ) {
-    final count = projectsAsync.value?.length ?? 0;
-    return Wrap(
-      alignment: WrapAlignment.spaceBetween,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      spacing: 12,
-      runSpacing: 10,
-      children: [
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(
-              Icons.folder_shared_rounded,
-              color: AppColors.amberPrimary,
-            ),
-            const SizedBox(width: 8),
-            Text(
-              'كافة مشاريع الورشة ($count)',
-              style: Theme.of(context).textTheme.titleLarge
-                  ?.copyWith(fontWeight: FontWeight.w800),
-            ),
-          ],
-        ),
-        ElevatedButton.icon(
-          icon: const Icon(Icons.add_rounded, size: 18),
-          label: const Text('مشروع جديد'),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: AppColors.amberPrimary,
-            foregroundColor: Colors.black,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10),
+  Widget _buildInlineKpiPill({
+    required IconData icon,
+    required String label,
+    required String value,
+    required Color color,
+    required bool isDark,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: isDark ? AppColors.darkCard : AppColors.lightCard,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 15, color: color),
+          const SizedBox(width: 6),
+          Text(
+            '$label:',
+            style: TextStyle(
+              fontSize: 12,
+              color: isDark ? AppColors.slate300 : AppColors.slate700,
             ),
           ),
-          onPressed: () => _showNewProjectDialog(context, activeWorkshopId),
-        ),
-      ],
+          const SizedBox(width: 6),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w900,
+              fontFamily: 'monospace',
+              color: color,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
-  Widget _buildProjectsList(
-    BuildContext context,
-    List<Project> projects,
-    String activeWorkshopId,
-    bool isDark,
-  ) {
-    final theme = Theme.of(context);
-
-    final filtered = projects.where((p) {
-      if (_searchQuery.isEmpty) return true;
-      return p.name.toLowerCase().contains(_searchQuery) ||
-          p.clientName.toLowerCase().contains(_searchQuery) ||
-          p.clientPhone.toLowerCase().contains(_searchQuery) ||
-          p.location.toLowerCase().contains(_searchQuery);
-    }).toList();
-
-    if (filtered.isEmpty) {
-      return Container(
-        padding: const EdgeInsets.symmetric(vertical: 40, horizontal: 20),
-        decoration: BoxDecoration(
-          color: isDark ? AppColors.darkCard : AppColors.lightSurface,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+  Widget _buildTopActionButton({
+    required String tooltip,
+    required IconData icon,
+    required String? label,
+    required Color color,
+    required bool isDark,
+    required VoidCallback onTap,
+  }) {
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: onTap,
+        child: Container(
+          padding: EdgeInsets.symmetric(
+            horizontal: label != null ? 10 : 8,
+            vertical: 7,
           ),
-        ),
-        child: Center(
-          child: Column(
+          decoration: BoxDecoration(
+            color: isDark ? AppColors.darkCard : AppColors.lightCard,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: color.withValues(alpha: 0.35)),
+          ),
+          child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
-                Icons.folder_open_rounded,
-                size: 64,
-                color: isDark ? AppColors.slate600 : AppColors.slate400,
-              ),
-              const SizedBox(height: 16),
-              Text(
-                _searchQuery.isEmpty
-                    ? 'لا توجد مشاريع مسجلة لهذه الورشة بعد'
-                    : 'لا توجد مشاريع مطابقة لبحثك',
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                _searchQuery.isEmpty
-                    ? 'ابدأ بإضافة أول مشروع لحفظ قياسات الشبابيك وإجراء حسابات التقطيع وقص المقاطع.'
-                    : 'جرب البحث باسم آخر أو إزالة نص البحث لعرض المشاريع.',
-                textAlign: TextAlign.center,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: AppColors.slate400,
-                ),
-              ),
-              if (_searchQuery.isEmpty) ...[
-                const SizedBox(height: 20),
-                ElevatedButton.icon(
-                  icon: const Icon(Icons.add_business_rounded),
-                  label: const Text('إنشاء أول مشروع الآن'),
-                  onPressed: () =>
-                      _showNewProjectDialog(context, activeWorkshopId),
+              Icon(icon, size: 17, color: color),
+              if (label != null) ...[
+                const SizedBox(width: 5),
+                Text(
+                  label,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               ],
             ],
           ),
         ),
-      );
-    }
+      ),
+    );
+  }
 
-    return ListView.separated(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      itemCount: filtered.length,
-      separatorBuilder: (_, _) => const SizedBox(height: 12),
-      itemBuilder: (context, index) {
-        final project = filtered[index];
-        return Card(
-          elevation: 0,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14),
-            side: BorderSide(
-              color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
-            ),
+  /// 2. Horizontal Segmented Workspace Tabs + Quick Action Pill Dock
+  Widget _buildWorkspaceNavAndQuickDock({
+    required BuildContext context,
+    required bool isDark,
+    required String activeWorkshopId,
+    required int projectsCount,
+    required int ordersCount,
+    required int quotedOrdersCount,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
+        border: Border(
+          bottom: BorderSide(
+            color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
           ),
-          child: InkWell(
-            borderRadius: BorderRadius.circular(14),
-            onTap: () {
-              context.push('/dashboard/owner/projects/${project.id}?workshopId=$activeWorkshopId');
-            },
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: AppColors.amberPrimary.withValues(alpha: 0.12),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: const Icon(
-                          Icons.business_rounded,
-                          color: AppColors.amberLight,
-                          size: 24,
+        ),
+      ),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 1280),
+          child: Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 12,
+            runSpacing: 10,
+            children: [
+              // Horizontal Segmented Tabs (Side-by-side, never stacked vertically!)
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _buildWorkspaceTabButton(
+                      index: 0,
+                      icon: Icons.architecture_rounded,
+                      label: 'المشاريع والقياسات ($projectsCount)',
+                      isDark: isDark,
+                    ),
+                    const SizedBox(width: 8),
+                    _buildWorkspaceTabButton(
+                      index: 1,
+                      icon: Icons.local_shipping_outlined,
+                      label: 'التوريد والموردين ($ordersCount)',
+                      badgeText: quotedOrdersCount > 0
+                          ? '$quotedOrdersCount تسعيرة جديدة'
+                          : null,
+                      isDark: isDark,
+                    ),
+                    const SizedBox(width: 8),
+                    _buildWorkspaceTabButton(
+                      index: 2,
+                      icon: Icons.handyman_outlined,
+                      label: 'أدوات وإعدادات الورشة',
+                      isDark: isDark,
+                    ),
+                  ],
+                ),
+              ),
+
+              // Quick-Access Pill Dock (1-click jump without scrolling)
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    ElevatedButton.icon(
+                      icon: const Icon(Icons.add_rounded, size: 18),
+                      label: const Text(
+                        'مشروع جديد',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 12,
                         ),
                       ),
-                      const SizedBox(width: 14),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              project.name,
-                              style: theme.textTheme.titleMedium?.copyWith(
-                                fontWeight: FontWeight.w700,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.amberLight,
+                        foregroundColor: AppColors.darkBackground,
+                        elevation: 0,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 10,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      onPressed: () =>
+                          _showNewProjectDialog(context, activeWorkshopId),
+                    ),
+                    const SizedBox(width: 8),
+                    _buildQuickDockPill(
+                      icon: Icons.receipt_long_outlined,
+                      label: 'طلبات الموردين',
+                      color: AppColors.glassBlueLight,
+                      isDark: isDark,
+                      onTap: () => context.push(
+                        '/dashboard/owner/orders?workshopId=$activeWorkshopId',
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    _buildQuickDockPill(
+                      icon: Icons.storefront_outlined,
+                      label: 'دليل الموردين',
+                      color: AppColors.amberLight,
+                      isDark: isDark,
+                      onTap: () => context.push('/dashboard/owner/suppliers'),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildWorkspaceTabButton({
+    required int index,
+    required IconData icon,
+    required String label,
+    String? badgeText,
+    required bool isDark,
+  }) {
+    final isSelected = _selectedTabIndex == index;
+    return InkWell(
+      borderRadius: BorderRadius.circular(8),
+      onTap: () => setState(() => _selectedTabIndex = index),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? AppColors.amberPrimary.withValues(alpha: 0.18)
+              : (isDark ? AppColors.darkCard : AppColors.lightCard),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: isSelected
+                ? AppColors.amberLight
+                : (isDark ? AppColors.darkBorder : AppColors.lightBorder),
+            width: isSelected ? 1.4 : 1.0,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              size: 17,
+              color: isSelected
+                  ? AppColors.amberLight
+                  : (isDark ? AppColors.slate300 : AppColors.slate600),
+            ),
+            const SizedBox(width: 7),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
+                color: isSelected
+                    ? AppColors.amberLight
+                    : (isDark ? AppColors.slate200 : AppColors.slate800),
+              ),
+            ),
+            if (badgeText != null) ...[
+              const SizedBox(width: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: AppColors.amberLight,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  badgeText,
+                  style: const TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.darkBackground,
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildQuickDockPill({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required bool isDark,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(8),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          color: isDark ? AppColors.darkCard : AppColors.lightCard,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 15, color: color),
+            const SizedBox(width: 5),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: isDark ? AppColors.slate200 : AppColors.slate800,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 3. TAB 0: Projects & Measurements Workspace (2-Column Grid, Immediately Visible!)
+  Widget _buildProjectsTabWorkspace({
+    required BuildContext context,
+    required AsyncValue<List<Project>> projectsAsync,
+    required String activeWorkshopId,
+    required bool isDark,
+    required int totalUnits,
+    required int activeClients,
+  }) {
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final showMobileKpiStrip = screenWidth < 820;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Slim KPI strip on mobile/small tablets
+          if (showMobileKpiStrip) ...[
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  _buildInlineKpiPill(
+                    icon: Icons.folder_copy_outlined,
+                    label: 'المشاريع',
+                    value: '${projectsAsync.value?.length ?? 0}',
+                    color: AppColors.amberLight,
+                    isDark: isDark,
+                  ),
+                  const SizedBox(width: 8),
+                  _buildInlineKpiPill(
+                    icon: Icons.window_rounded,
+                    label: 'وحدات القياس',
+                    value: '$totalUnits',
+                    color: AppColors.glassBlueLight,
+                    isDark: isDark,
+                  ),
+                  const SizedBox(width: 8),
+                  _buildInlineKpiPill(
+                    icon: Icons.people_alt_outlined,
+                    label: 'العملاء',
+                    value: '$activeClients',
+                    color: AppColors.success,
+                    isDark: isDark,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 10),
+          ],
+
+          // Search Bar Row
+          TextField(
+            decoration: InputDecoration(
+              hintText:
+                  'ابحث باسم المشروع أو العميل أو الهاتف أو الموقع...',
+              prefixIcon: const Icon(
+                Icons.search_rounded,
+                color: AppColors.glassBlueLight,
+                size: 20,
+              ),
+              suffixIcon: _searchQuery.isNotEmpty
+                  ? IconButton(
+                      icon: const Icon(Icons.clear_rounded, size: 18),
+                      onPressed: () => setState(() => _searchQuery = ''),
+                    )
+                  : null,
+              filled: true,
+              fillColor: isDark ? AppColors.darkSurface : AppColors.lightSurface,
+              isDense: true,
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 14,
+                vertical: 11,
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: BorderSide(
+                  color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+                ),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: const BorderSide(color: AppColors.glassBlueLight),
+              ),
+            ),
+            onChanged: (val) =>
+                setState(() => _searchQuery = val.trim().toLowerCase()),
+          ),
+          const SizedBox(height: 12),
+
+          // Projects Grid (2 columns on desktop/tablet so user sees 4+ projects at once without scrolling!)
+          Expanded(
+            child: projectsAsync.when(
+              data: (projects) {
+                final filtered = projects.where((p) {
+                  if (_searchQuery.isEmpty) return true;
+                  return p.name.toLowerCase().contains(_searchQuery) ||
+                      p.clientName.toLowerCase().contains(_searchQuery) ||
+                      p.clientPhone.toLowerCase().contains(_searchQuery) ||
+                      p.location.toLowerCase().contains(_searchQuery);
+                }).toList();
+
+                if (filtered.isEmpty) {
+                  return _buildEmptyProjectsState(
+                    context,
+                    activeWorkshopId,
+                    isDark,
+                  );
+                }
+
+                return LayoutBuilder(
+                  builder: (context, constraints) {
+                    final columns = constraints.maxWidth >= 1060
+                        ? 3
+                        : (constraints.maxWidth >= 660 ? 2 : 1);
+
+                    return GridView.builder(
+                      padding: const EdgeInsets.only(bottom: 16),
+                      itemCount: filtered.length,
+                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: columns,
+                        mainAxisSpacing: 12,
+                        crossAxisSpacing: 12,
+                        mainAxisExtent: 168,
+                      ),
+                      itemBuilder: (context, index) {
+                        final project = filtered[index];
+                        return _buildCompactProjectCard(
+                          context: context,
+                          project: project,
+                          activeWorkshopId: activeWorkshopId,
+                          isDark: isDark,
+                        );
+                      },
+                    );
+                  },
+                );
+              },
+              loading: () => const Center(child: CircularProgressIndicator()),
+              error: (err, _) => Center(
+                child: Text(
+                  'حدث خطأ أثناء تحميل المشاريع: $err',
+                  style: const TextStyle(color: AppColors.error),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCompactProjectCard({
+    required BuildContext context,
+    required Project project,
+    required String activeWorkshopId,
+    required bool isDark,
+  }) {
+    final theme = Theme.of(context);
+    return Material(
+      color: isDark ? AppColors.darkCard : AppColors.lightSurface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+        side: BorderSide(
+          color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+        ),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: () => context.push(
+          '/dashboard/owner/projects/${project.id}?workshopId=$activeWorkshopId',
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // RTL Right-Edge Amber Indicator Bar
+            Container(
+              width: 4,
+              decoration: const BoxDecoration(
+                color: AppColors.amberLight,
+                borderRadius: BorderRadius.horizontal(
+                  right: Radius.circular(10),
+                ),
+              ),
+            ),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Row 1: Title + Unit Count Badge + Delete Button
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(7),
+                          decoration: BoxDecoration(
+                            color: AppColors.amberPrimary.withValues(
+                              alpha: 0.14,
+                            ),
+                            borderRadius: BorderRadius.circular(7),
+                          ),
+                          child: const Icon(
+                            Icons.architecture_rounded,
+                            color: AppColors.amberLight,
+                            size: 18,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            project.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.titleSmall?.copyWith(
+                              fontWeight: FontWeight.w800,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: AppColors.glassBlue.withValues(alpha: 0.14),
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(
+                              color: AppColors.glassBlueLight.withValues(
+                                alpha: 0.35,
                               ),
                             ),
-                            if (project.clientName.isNotEmpty) ...[
-                              const SizedBox(height: 2),
+                          ),
+                          child: Text(
+                            '${project.unitCount} وحدة',
+                            style: const TextStyle(
+                              color: AppColors.glassBlueLight,
+                              fontWeight: FontWeight.w800,
+                              fontFamily: 'monospace',
+                              fontSize: 11,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+
+                    // Row 2: Client & Location Metadata
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 4,
+                      children: [
+                        if (project.clientName.isNotEmpty)
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(
+                                Icons.person_outline_rounded,
+                                size: 13,
+                                color: AppColors.slate400,
+                              ),
+                              const SizedBox(width: 4),
                               Text(
-                                'العميل: ${project.clientName}${project.clientPhone.isNotEmpty ? " • ${project.clientPhone}" : ""}',
-                                style: theme.textTheme.bodySmall?.copyWith(
+                                '${project.clientName}${project.clientPhone.isNotEmpty ? " • ${project.clientPhone}" : ""}',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: isDark
+                                      ? AppColors.slate300
+                                      : AppColors.slate600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        if (project.location.isNotEmpty)
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(
+                                Icons.place_outlined,
+                                size: 13,
+                                color: AppColors.slate400,
+                              ),
+                              const SizedBox(width: 3),
+                              Text(
+                                project.location,
+                                style: TextStyle(
+                                  fontSize: 11,
                                   color: isDark
                                       ? AppColors.slate400
                                       : AppColors.slate600,
                                 ),
                               ),
                             ],
-                          ],
-                        ),
-                      ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 6,
-                        ),
-                        decoration: BoxDecoration(
-                          color: isDark
-                              ? AppColors.darkSurface
-                              : AppColors.lightBackground,
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(
-                            color: isDark
-                                ? AppColors.darkBorder
-                                : AppColors.lightBorder,
                           ),
-                        ),
-                        child: Text(
-                          '${project.unitCount} عناصر قياس',
-                          style: const TextStyle(
-                            color: AppColors.amberPrimary,
-                            fontWeight: FontWeight.w700,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 4),
-                      IconButton(
-                        tooltip: 'حذف المشروع',
-                        icon: const Icon(
-                          Icons.delete_outline_rounded,
-                          color: AppColors.error,
-                          size: 20,
-                        ),
-                        onPressed: () => _confirmDeleteProject(
-                          context,
-                          activeWorkshopId,
-                          project,
-                        ),
-                      ),
-                    ],
-                  ),
-                  if (project.location.isNotEmpty) ...[
-                    const SizedBox(height: 10),
+                      ],
+                    ),
+                    const Spacer(),
+
+                    // Row 3: 3 Direct 1-Click Action Buttons (as designed in Stitch!)
                     Row(
                       children: [
-                        const Icon(
-                          Icons.place_outlined,
-                          size: 14,
-                          color: AppColors.slate400,
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            icon: const Icon(Icons.straighten_rounded, size: 15),
+                            label: const Text(
+                              'فتح القياسات',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppColors.amberLight,
+                              foregroundColor: AppColors.darkBackground,
+                              elevation: 0,
+                              visualDensity: VisualDensity.compact,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 6,
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                            ),
+                            onPressed: () => context.push(
+                              '/dashboard/owner/projects/${project.id}?workshopId=$activeWorkshopId',
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            icon: const Icon(
+                              Icons.assignment_outlined,
+                              size: 15,
+                              color: AppColors.glassBlueLight,
+                            ),
+                            label: const Text(
+                              'الاحتياجات والتوريد',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.glassBlueLight,
+                              ),
+                            ),
+                            style: OutlinedButton.styleFrom(
+                              visualDensity: VisualDensity.compact,
+                              side: BorderSide(
+                                color: AppColors.glassBlueLight.withValues(
+                                  alpha: 0.45,
+                                ),
+                              ),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 6,
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                            ),
+                            onPressed: () => context.push(
+                              '/dashboard/owner/projects/${project.id}/requirements?workshopId=$activeWorkshopId',
+                            ),
+                          ),
                         ),
                         const SizedBox(width: 4),
-                        Text(
-                          project.location,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: isDark
-                                ? AppColors.slate400
-                                : AppColors.slate600,
-                            fontSize: 11,
+                        IconButton(
+                          tooltip: 'حذف المشروع',
+                          visualDensity: VisualDensity.compact,
+                          icon: const Icon(
+                            Icons.delete_outline_rounded,
+                            color: AppColors.error,
+                            size: 18,
+                          ),
+                          onPressed: () => _confirmDeleteProject(
+                            context,
+                            activeWorkshopId,
+                            project,
                           ),
                         ),
                       ],
                     ),
                   ],
-                ],
+                ),
               ),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEmptyProjectsState(
+    BuildContext context,
+    String activeWorkshopId,
+    bool isDark,
+  ) {
+    final theme = Theme.of(context);
+    return Center(
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 460),
+        padding: const EdgeInsets.all(28),
+        decoration: BoxDecoration(
+          color: isDark ? AppColors.darkCard : AppColors.lightSurface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
           ),
-        );
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.folder_open_rounded,
+              size: 52,
+              color: isDark ? AppColors.slate600 : AppColors.slate400,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              _searchQuery.isEmpty
+                  ? 'لا توجد مشاريع مسجلة لهذه الورشة بعد'
+                  : 'لا توجد مشاريع مطابقة لبحثك',
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              _searchQuery.isEmpty
+                  ? 'ابدأ بإضافة أول مشروع لحفظ قياسات الشبابيك وحساب الاحتياجات والتقطيع.'
+                  : 'جرب البحث باسم آخر أو مسح نص البحث.',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: AppColors.slate400,
+              ),
+            ),
+            if (_searchQuery.isEmpty) ...[
+              const SizedBox(height: 16),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.add_business_rounded),
+                label: const Text('إنشاء أول مشروع الآن'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.amberLight,
+                  foregroundColor: AppColors.darkBackground,
+                ),
+                onPressed: () =>
+                    _showNewProjectDialog(context, activeWorkshopId),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 4. TAB 1: Supply, Orders & Suppliers Workspace (Side-by-Side Hub)
+  Widget _buildSupplyAndSuppliersTabWorkspace({
+    required BuildContext context,
+    required AsyncValue<List<OrderModel>> ordersAsync,
+    required String activeWorkshopId,
+    required bool isDark,
+  }) {
+    final orders = ordersAsync.value ?? [];
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Top 2 Side-by-Side Action Cards (Orders & Suppliers Directory)
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final isWide = constraints.maxWidth >= 680;
+              final cards = [
+                _buildHubActionCard(
+                  title: 'طلبات التوريد وأوامر الشراء',
+                  subtitle:
+                      'متابعة الطلبات المرسلة من احتياجات المشاريع، مراجعة تسعيرات الموردين واعتمادها',
+                  badgeText: '${orders.length} طلب',
+                  icon: Icons.local_shipping_outlined,
+                  color: AppColors.glassBlueLight,
+                  isDark: isDark,
+                  onTap: () => context.push(
+                    '/dashboard/owner/orders?workshopId=$activeWorkshopId',
+                  ),
+                ),
+                _buildHubActionCard(
+                  title: 'دليل الموردين المعتمدين',
+                  subtitle:
+                      'استعراض الموردين وأرقام التواصل المباشر عبر واتساب والعناوين',
+                  badgeText: 'دليل الموردين',
+                  icon: Icons.storefront_rounded,
+                  color: AppColors.amberLight,
+                  isDark: isDark,
+                  onTap: () => context.push('/dashboard/owner/suppliers'),
+                ),
+              ];
+
+              if (isWide) {
+                return Row(
+                  children: [
+                    Expanded(child: cards[0]),
+                    const SizedBox(width: 12),
+                    Expanded(child: cards[1]),
+                  ],
+                );
+              }
+              return Column(
+                children: [
+                  cards[0],
+                  const SizedBox(height: 8),
+                  cards[1],
+                ],
+              );
+            },
+          ),
+          const SizedBox(height: 16),
+
+          // Live Recent Orders Table / Grid right inside the tab
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                'أحدث طلبات التوريد وعروض الأسعار من الموردين',
+                style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
+              ),
+              TextButton.icon(
+                icon: const Icon(Icons.open_in_new_rounded, size: 16),
+                label: const Text('عرض كل الطلبات'),
+                onPressed: () => context.push(
+                  '/dashboard/owner/orders?workshopId=$activeWorkshopId',
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Expanded(
+            child: orders.isEmpty
+                ? Center(
+                    child: Text(
+                      'لا توجد طلبات توريد مرسلة بعد — يمكنك إرسال طلب مباشرة من شاشة احتياجات أي مشروع.',
+                      style: TextStyle(
+                        color: isDark
+                            ? AppColors.slate400
+                            : AppColors.slate600,
+                      ),
+                    ),
+                  )
+                : ListView.separated(
+                    itemCount: orders.take(6).length,
+                    separatorBuilder: (_, _) => const SizedBox(height: 8),
+                    itemBuilder: (context, index) {
+                      final order = orders[index];
+                      final isQuoted = order.status == OrderStatus.quoted;
+                      return Material(
+                        color: isDark
+                            ? AppColors.darkCard
+                            : AppColors.lightSurface,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          side: BorderSide(
+                            color: isQuoted
+                                ? AppColors.amberLight
+                                : (isDark
+                                      ? AppColors.darkBorder
+                                      : AppColors.lightBorder),
+                          ),
+                        ),
+                        child: ListTile(
+                          dense: true,
+                          onTap: () => context.push(
+                            '/dashboard/owner/orders/${order.id}?workshopId=$activeWorkshopId',
+                          ),
+                          leading: Icon(
+                            isQuoted
+                                ? Icons.request_quote_rounded
+                                : Icons.receipt_long_rounded,
+                            color: isQuoted
+                                ? AppColors.amberLight
+                                : AppColors.glassBlueLight,
+                          ),
+                          title: Text(
+                            '${order.orderNumber} • ${order.supplierName}${order.projectName.isNotEmpty ? " (${order.projectName})" : ""}',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 13,
+                            ),
+                          ),
+                          subtitle: Text(
+                            'الأصناف المتوفرة: ${order.availableItemsCount}/${order.items.length} • الإجمالي: ${order.computedTotal.toStringAsFixed(2)} ${order.currency}',
+                            style: const TextStyle(fontSize: 11),
+                          ),
+                          trailing: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: (isQuoted
+                                      ? AppColors.amberLight
+                                      : AppColors.glassBlueLight)
+                                  .withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Text(
+                              order.status.arabicLabel,
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w800,
+                                color: isQuoted
+                                    ? AppColors.amberLight
+                                    : AppColors.glassBlueLight,
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 5. TAB 2: Workshop Tools, Rules & Branches (Side-by-Side Grid)
+  Widget _buildWorkshopToolsTabWorkspace({
+    required BuildContext context,
+    required WorkshopInfo activeWorkshop,
+    required String activeWorkshopId,
+    required List<WorkshopInfo> workshops,
+    required bool isDark,
+  }) {
+    final tools = [
+      {
+        'title': 'قواعد التقطيع ومعايير منشار 660 سم',
+        'desc': 'تخصيص معادلات الخصم وسماكة شفرة المنشار وطول القضيب القياسي',
+        'icon': Icons.tune_rounded,
+        'color': AppColors.amberLight,
+        'onTap': () =>
+            context.push('/dashboard/owner/rules?workshopId=$activeWorkshopId'),
       },
+      {
+        'title': 'مخزون الفضلات (Remnants)',
+        'desc': 'إدارة بواقي قضبان الألمنيوم الصالحة لإعادة الاستخدام وتقليل الهدر',
+        'icon': Icons.inventory_2_outlined,
+        'color': AppColors.success,
+        'onTap': () => context.push(
+          '/dashboard/owner/remnants?workshopId=$activeWorkshopId',
+        ),
+      },
+      {
+        'title': 'ماسح قطع الألمنيوم QR',
+        'desc': 'مسح ملصقات القطع المقصوصة في الورشة للتحقق من الأبعاد والوحدة',
+        'icon': Icons.qr_code_scanner_rounded,
+        'color': AppColors.glassBlueLight,
+        'onTap': () => context.push('/scanner'),
+      },
+      {
+        'title': 'إضافة فرع / ورشة عمل جديدة',
+        'desc': 'تسجيل ورشة إضافية تحت حسابك والتبديل الفوري بينها من الشريط العلوي',
+        'icon': Icons.add_home_work_rounded,
+        'color': AppColors.amberPrimary,
+        'onTap': () => _showNewWorkshopDialog(context),
+      },
+    ];
+
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final columns = constraints.maxWidth >= 680 ? 2 : 1;
+          return GridView.builder(
+            itemCount: tools.length,
+            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: columns,
+              mainAxisSpacing: 12,
+              crossAxisSpacing: 12,
+              mainAxisExtent: 112,
+            ),
+            itemBuilder: (context, index) {
+              final t = tools[index];
+              final color = t['color'] as Color;
+              return _buildHubActionCard(
+                title: t['title'] as String,
+                subtitle: t['desc'] as String,
+                badgeText: 'أداة هندسية',
+                icon: t['icon'] as IconData,
+                color: color,
+                isDark: isDark,
+                onTap: t['onTap'] as VoidCallback,
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildHubActionCard({
+    required String title,
+    required String subtitle,
+    required String badgeText,
+    required IconData icon,
+    required Color color,
+    required bool isDark,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: isDark ? AppColors.darkCard : AppColors.lightSurface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+        side: BorderSide(
+          color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+        ),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(11),
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: color.withValues(alpha: 0.35)),
+                ),
+                child: Icon(icon, color: color, size: 22),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w800,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 7,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: color.withValues(alpha: 0.14),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            badgeText,
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                              color: color,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      subtitle,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: isDark
+                            ? AppColors.slate400
+                            : AppColors.slate600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 6. Compact Technical Status Footer Bar (32px)
+  Widget _buildCompactStatusBar({
+    required WorkshopInfo activeWorkshop,
+    required int workshopsCount,
+    required bool isDark,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      decoration: BoxDecoration(
+        color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
+        border: Border(
+          top: BorderSide(
+            color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+          ),
+        ),
+      ),
+      child: Wrap(
+        alignment: WrapAlignment.spaceBetween,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        spacing: 16,
+        runSpacing: 4,
+        children: [
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.precision_manufacturing_outlined,
+                size: 13,
+                color: AppColors.amberLight,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                'الورشة: ${activeWorkshop.name}${activeWorkshop.location.isNotEmpty ? " (${activeWorkshop.location})" : ""}',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: isDark ? AppColors.slate400 : AppColors.slate600,
+                ),
+              ),
+            ],
+          ),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'طول القضيب القياسي: 660 سم  •  الفروع المرتبطة: $workshopsCount',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontFamily: 'monospace',
+                  color: isDark ? AppColors.slate400 : AppColors.slate600,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 
@@ -1087,7 +1747,9 @@ class _OwnerDashboardScreenState extends ConsumerState<OwnerDashboardScreen> {
                           final id = await repo.createProject(newProj);
                           if (context.mounted) {
                             ctx.pop();
-                            context.push('/dashboard/owner/projects/$id?workshopId=$workshopId');
+                            context.push(
+                              '/dashboard/owner/projects/$id?workshopId=$workshopId',
+                            );
                           }
                         } catch (e) {
                           if (context.mounted) {

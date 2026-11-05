@@ -70,25 +70,80 @@ class _SupplierOrdersScreenState extends ConsumerState<SupplierOrdersScreen> {
                 ...filtered.map(
                   (order) => Card(
                     margin: const EdgeInsets.only(bottom: 12),
-                    child: ListTile(
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(12),
                       onTap: () => context.push(
                         '/dashboard/supplier/orders/${order.id}',
                       ),
-                      leading: const CircleAvatar(
-                        backgroundColor: AppColors.glassBlue,
-                        child: Icon(Icons.inbox_rounded, color: Colors.white),
-                      ),
-                      title: Text(
-                        '${order.orderNumber} — ${order.workshopName}',
-                        style: const TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                      subtitle: Text(
-                        'الأصناف: ${order.items.length} • الإجمالي: ${order.computedTotal.toStringAsFixed(2)} ${order.currency}',
-                      ),
-                      trailing: Chip(
-                        label: Text(
-                          order.status.arabicLabel,
-                          style: const TextStyle(fontSize: 11),
+                      child: Padding(
+                        padding: const EdgeInsets.all(14),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            CircleAvatar(
+                              backgroundColor: order.status == OrderStatus.sent
+                                  ? AppColors.amberPrimary
+                                  : AppColors.glassBlue,
+                              child: Icon(
+                                order.status == OrderStatus.sent
+                                    ? Icons.request_quote_rounded
+                                    : Icons.inbox_rounded,
+                                color: Colors.white,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    '${order.orderNumber} — ${order.workshopName}',
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 14,
+                                    ),
+                                  ),
+                                  if (order.projectName.trim().isNotEmpty) ...[
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      'المشروع: ${order.projectName}',
+                                      style: const TextStyle(
+                                        fontSize: 12,
+                                        color: AppColors.amberPrimary,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ],
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    'الأصناف المتوفرة: ${order.availableItemsCount}/${order.items.length} • الإجمالي: ${order.computedTotal.toStringAsFixed(2)} ${order.currency}',
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      color: AppColors.slate400,
+                                    ),
+                                  ),
+                                  if (order.status == OrderStatus.sent) ...[
+                                    const SizedBox(height: 4),
+                                    const Text(
+                                      'اضغط لتحديد توفر الأصناف وإدخال الأسعار وإرسال التسعيرة للورشة',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        color: AppColors.amberPrimary,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Chip(
+                              label: Text(
+                                order.status.arabicLabel,
+                                style: const TextStyle(fontSize: 11),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ),

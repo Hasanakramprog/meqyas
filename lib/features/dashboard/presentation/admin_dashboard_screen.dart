@@ -13,11 +13,8 @@ class AdminDashboardScreen extends StatelessWidget {
 
     return Scaffold(
       appBar: AppBar(
+        automaticallyImplyLeading: false,
         title: const Text('لوحة الإدارة العامة (Admin)'),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_rounded),
-          onPressed: () => context.go('/'),
-        ),
         actions: [
           IconButton(
             tooltip: 'تسجيل الخروج',

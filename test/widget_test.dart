@@ -35,7 +35,7 @@ class FakeAuthRepository implements AuthRepository {
 }
 
 void main() {
-  testWidgets('MeqyasApp loads in Arabic RTL with header title',
+  testWidgets('MeqyasApp starts at LoginScreen when not signed in',
       (WidgetTester tester) async {
     await tester.pumpWidget(
       ProviderScope(
@@ -47,7 +47,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('مِقْيَاس'), findsWidgets);
-    expect(find.text('هندسة الألمنيوم والزجاج'), findsOneWidget);
+    expect(find.text('مرحباً بك في مِقْيَاس'), findsOneWidget);
+    expect(find.text('تسجيل الدخول'), findsWidgets);
   });
 }

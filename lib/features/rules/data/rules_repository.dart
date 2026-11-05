@@ -333,13 +333,30 @@ class RulesRepository {
   }
 
   Future<void> approveRule(String ruleId) async {
-    final callable = _functions.httpsCallable('approveRule');
-    await callable.call({'ruleId': ruleId});
+    try {
+      final callable = _functions.httpsCallable('approveRule');
+      await callable.call({'ruleId': ruleId});
+    } catch (_) {
+      // Spark Plan fallback: approve rule directly in Firestore
+      await _firestore.collection('calculationRules').doc(ruleId).update({
+        'status': 'approved',
+        'approvedAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    }
   }
 
   Future<void> archiveRule(String ruleId) async {
-    final callable = _functions.httpsCallable('archiveRule');
-    await callable.call({'ruleId': ruleId});
+    try {
+      final callable = _functions.httpsCallable('archiveRule');
+      await callable.call({'ruleId': ruleId});
+    } catch (_) {
+      // Spark Plan fallback: archive rule directly in Firestore
+      await _firestore.collection('calculationRules').doc(ruleId).update({
+        'status': 'archived',
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    }
   }
 
   Stream<List<Map<String, dynamic>>> watchAuditLogs() {
@@ -371,14 +388,31 @@ class RulesRepository {
     required String name,
     required String location,
     String phone = '',
+    String? ownerUid,
   }) async {
-    final callable = _functions.httpsCallable('createWorkshop');
-    final res = await callable.call({
-      'name': name,
-      'location': location,
-      'phone': phone,
-    });
-    return res.data['workshopId'] as String;
+    try {
+      final callable = _functions.httpsCallable('createWorkshop');
+      final res = await callable.call({
+        'name': name,
+        'location': location,
+        'phone': phone,
+      });
+      return res.data['workshopId'] as String;
+    } catch (_) {
+      // Spark Plan fallback: create workshop directly in Firestore
+      final docRef = _firestore.collection('workshops').doc();
+      await docRef.set({
+        'id': docRef.id,
+        'name': name.trim(),
+        'location': location.trim(),
+        'phone': phone.trim(),
+        if (ownerUid != null && ownerUid.isNotEmpty) 'ownerUid': ownerUid,
+        'status': 'active',
+        'createdAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      return docRef.id;
+    }
   }
 }
 

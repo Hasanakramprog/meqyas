@@ -1,15 +1,23 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:maqyas_engine/maqyas_engine.dart';
+import 'package:printing/printing.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../../app/theme/app_colors.dart';
 import '../../auth/presentation/controllers/auth_controller.dart';
 import '../../catalog/data/catalog_repository.dart';
 import '../../catalog/domain/catalog_item.dart';
 import '../../cut_optimization/data/cut_plan_repository.dart';
+import '../../orders/data/orders_repository.dart';
+import '../../orders/domain/order_model.dart';
 import '../../projects/domain/models/project.dart';
 import '../../projects/domain/models/project_unit.dart';
 import '../../projects/presentation/screens/project_detail_screen.dart';
 import '../../rules/data/rules_repository.dart';
+import '../../suppliers/data/suppliers_repository.dart';
+import '../../suppliers/domain/supplier.dart';
+import '../data/requirements_pdf_generator.dart';
 import '../data/requirements_repository.dart';
 import '../data/requirements_service.dart';
 import '../domain/requirement_line.dart';
@@ -32,6 +40,7 @@ class ProjectRequirementsScreen extends ConsumerStatefulWidget {
 class _ProjectRequirementsScreenState
     extends ConsumerState<ProjectRequirementsScreen> {
   bool _isGenerating = false;
+  bool _isExportingPdf = false;
   bool _initialGenerationTriggered = false;
   String _selectedCategoryFilter = 'all';
 
@@ -222,6 +231,16 @@ class _ProjectRequirementsScreenState
             ],
           ),
           actions: [
+            IconButton(
+              tooltip: 'متابعة طلبات التوريد والتسعير المرسلة للموردين',
+              icon: const Icon(
+                Icons.local_shipping_outlined,
+                color: AppColors.glassBlueLight,
+              ),
+              onPressed: () => context.push(
+                '/dashboard/owner/orders?workshopId=$workshopId',
+              ),
+            ),
             IconButton(
               tooltip: 'إعادة التوليد من وحدات المشروع وخطة القص',
               icon: _isGenerating
@@ -512,6 +531,18 @@ class _ProjectRequirementsScreenState
                           },
                         ),
                 ),
+
+                // 5. Post-Requirements 3-Option Action Bar (Spec §5.5)
+                if (toBuyLinesCount > 0)
+                  _buildPostRequirementsActionBar(
+                    context: context,
+                    workshopId: workshopId,
+                    workshops: workshops,
+                    project: project,
+                    activeLines: activeLines,
+                    toBuyCount: toBuyLinesCount,
+                    isDark: isDark,
+                  ),
               ],
             );
           },
@@ -1892,6 +1923,634 @@ class _ProjectRequirementsScreenState
                         );
                   },
                   child: Text(isEditing ? 'حفظ التعديلات' : 'إضافة للجدول'),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildPostRequirementsActionBar({
+    required BuildContext context,
+    required String workshopId,
+    required List<WorkshopInfo> workshops,
+    required Project? project,
+    required List<RequirementLine> activeLines,
+    required int toBuyCount,
+    required bool isDark,
+  }) {
+    final toBuyLines = activeLines.where((l) => l.toBuyQty > 0).toList();
+    final workshopInfo = workshops.firstWhere(
+      (w) => w.id == workshopId,
+      orElse: () => WorkshopInfo(
+        id: workshopId,
+        name: workshops.isNotEmpty ? workshops.first.name : 'ورشة ألمنيوم',
+        location: workshops.isNotEmpty ? workshops.first.location : '',
+        phone: workshops.isNotEmpty ? workshops.first.phone : '',
+      ),
+    );
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+      decoration: BoxDecoration(
+        color: isDark ? AppColors.darkSurface : Colors.white,
+        border: Border(
+          top: BorderSide(
+            color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+          ),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.08),
+            blurRadius: 10,
+            offset: const Offset(0, -2),
+          ),
+        ],
+      ),
+      child: SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                const Icon(
+                  Icons.assignment_turned_in_rounded,
+                  size: 18,
+                  color: AppColors.amberPrimary,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'جاهز للخطوة التالية ($toBuyCount صنف مطلوب للشراء): اختر طريقة التصدير أو الإرسال للمورد',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: [
+                // Option 1: Download Requirements PDF
+                OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppColors.amberPrimary,
+                    side: const BorderSide(color: AppColors.amberPrimary),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 12,
+                    ),
+                  ),
+                  icon: _isExportingPdf
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.picture_as_pdf_rounded, size: 18),
+                  label: const Text(
+                    '1. تحميل PDF للاحتياجات',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  onPressed: _isExportingPdf
+                      ? null
+                      : () => _exportRequirementsPdf(
+                            context: context,
+                            workshopInfo: workshopInfo,
+                            project: project,
+                            toBuyLines: toBuyLines,
+                          ),
+                ),
+
+                // Option 2: Select Supplier & Send Request In-App
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.amberPrimary,
+                    foregroundColor: Colors.black,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 12,
+                    ),
+                  ),
+                  icon: const Icon(Icons.send_to_mobile_rounded, size: 18),
+                  label: const Text(
+                    '2. اختيار مورد وإرسال الطلب بالتطبيق',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  onPressed: () => _showSendInAppOrderDialog(
+                    context: context,
+                    workshopInfo: workshopInfo,
+                    project: project,
+                    toBuyLines: toBuyLines,
+                  ),
+                ),
+
+                // Option 3: Select Supplier & Send PDF to WhatsApp
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.success,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 12,
+                    ),
+                  ),
+                  icon: const Icon(Icons.chat_rounded, size: 18),
+                  label: const Text(
+                    '3. اختيار مورد وإرسال PDF لواتساب',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  onPressed: () => _showSendWhatsAppWithPdfDialog(
+                    context: context,
+                    workshopInfo: workshopInfo,
+                    project: project,
+                    toBuyLines: toBuyLines,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _exportRequirementsPdf({
+    required BuildContext context,
+    required WorkshopInfo workshopInfo,
+    required Project? project,
+    required List<RequirementLine> toBuyLines,
+    String? supplierName,
+    String? generalNote,
+  }) async {
+    setState(() => _isExportingPdf = true);
+    try {
+      final projectName = project?.name ?? 'المشروع';
+      final pdfBytes = await RequirementsPdfGenerator.generate(
+        workshopName: workshopInfo.name,
+        workshopPhone: workshopInfo.phone,
+        workshopLocation: workshopInfo.location,
+        projectName: projectName,
+        clientName: project?.clientName ?? '',
+        supplierName: supplierName,
+        generalNote: generalNote,
+        lines: toBuyLines,
+      );
+
+      await Printing.layoutPdf(
+        name: 'احتياجات_مواد_${projectName.replaceAll(" ", "_")}.pdf',
+        onLayout: (_) async => pdfBytes,
+      );
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('فشل إنشاء ملف PDF: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isExportingPdf = false);
+    }
+  }
+
+  Future<void> _showSendInAppOrderDialog({
+    required BuildContext context,
+    required WorkshopInfo workshopInfo,
+    required Project? project,
+    required List<RequirementLine> toBuyLines,
+  }) async {
+    final suppliers = ref.read(suppliersListProvider).value ?? [];
+    Supplier? selectedSupplier =
+        suppliers.isNotEmpty ? suppliers.first : null;
+    final notesCtrl = TextEditingController();
+    var isSending = false;
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          return Directionality(
+            textDirection: TextDirection.rtl,
+            child: AlertDialog(
+              title: const Row(
+                children: [
+                  Icon(
+                    Icons.send_to_mobile_rounded,
+                    color: AppColors.amberPrimary,
+                  ),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'إرسال طلب تسعير وتوريد للمورد بالتطبيق',
+                      style: TextStyle(fontSize: 16),
+                    ),
+                  ),
+                ],
+              ),
+              content: SizedBox(
+                width: 460,
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: AppColors.glassBlue.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Text(
+                          'سيتم إرسال (${toBuyLines.length} صنف مطلوب للشراء) إلى المورد المختار داخل التطبيق.\n'
+                          'سيقوم المورد بمراجعة الأصناف وتحديد المتوفر لديه وإدخال الأسعار والملاحظات وإرسالها لك.',
+                          style: const TextStyle(fontSize: 12, height: 1.4),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      if (suppliers.isEmpty)
+                        const Padding(
+                          padding: EdgeInsets.all(12),
+                          child: Text(
+                            'لا يوجد موردون مسجلون حالياً في النظام. يرجى إضافة مورد من لوحة الإدارة.',
+                            style: TextStyle(color: AppColors.error),
+                          ),
+                        )
+                      else
+                        DropdownButtonFormField<Supplier>(
+                          initialValue: selectedSupplier,
+                          decoration: const InputDecoration(
+                            labelText: 'اختر المورد *',
+                            border: OutlineInputBorder(),
+                            prefixIcon: Icon(Icons.storefront_rounded),
+                          ),
+                          items: suppliers.map((s) {
+                            return DropdownMenuItem<Supplier>(
+                              value: s,
+                              child: Text(
+                                '${s.name}${s.phone.isNotEmpty ? " (${s.phone})" : ""}',
+                              ),
+                            );
+                          }).toList(),
+                          onChanged: (val) {
+                            setDialogState(() => selectedSupplier = val);
+                          },
+                        ),
+                      const SizedBox(height: 14),
+                      TextField(
+                        controller: notesCtrl,
+                        maxLines: 3,
+                        decoration: const InputDecoration(
+                          labelText: 'ملاحظات الورشة للمورد (اختياري)',
+                          hintText:
+                              'مثال: يرجى تسعير الأصناف المتوفرة لديكم وتوضيح موعد التوريد...',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: isSending ? null : () => Navigator.pop(ctx),
+                  child: const Text('إلغاء'),
+                ),
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.amberPrimary,
+                    foregroundColor: Colors.black,
+                  ),
+                  icon: isSending
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.send_rounded, size: 18),
+                  label: const Text(
+                    'إرسال الطلب للمورد',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  onPressed: (isSending || selectedSupplier == null)
+                      ? null
+                      : () async {
+                          setDialogState(() => isSending = true);
+                          try {
+                            final currentUser =
+                                ref.read(currentUserProvider).value;
+                            final projectName = project?.name ?? 'مشروع';
+                            final orderItems = toBuyLines.map((line) {
+                              return OrderLineItem(
+                                itemId: line.itemId ?? line.engineItemCode,
+                                nameArabic: line.nameArabic,
+                                category: line.category,
+                                requestedQty: line.toBuyQty,
+                                qty: line.toBuyQty,
+                                isAvailable: true,
+                                unit: line.unit,
+                                unitPrice: 0.0,
+                                projectId: widget.projectId,
+                                projectName: projectName,
+                                note: line.note,
+                              );
+                            }).toList();
+
+                            final orderId = await ref
+                                .read(ordersRepositoryProvider)
+                                .createOrder(
+                                  workshopId: workshopInfo.id,
+                                  workshopName: workshopInfo.name,
+                                  workshopPhone: workshopInfo.phone,
+                                  workshopLocation: workshopInfo.location,
+                                  supplierId: selectedSupplier!.id,
+                                  supplierName: selectedSupplier!.name,
+                                  projectId: widget.projectId,
+                                  projectName: projectName,
+                                  items: orderItems,
+                                  notes: notesCtrl.text.trim(),
+                                  initialStatus: OrderStatus.sent,
+                                  actorUid: currentUser?.uid,
+                                );
+
+                            if (ctx.mounted) {
+                              Navigator.pop(ctx);
+                            }
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    'تم إرسال الطلب إلى «${selectedSupplier!.name}» بنجاح ✅',
+                                  ),
+                                  backgroundColor: AppColors.success,
+                                  action: SnackBarAction(
+                                    label: 'تتبع الطلب',
+                                    textColor: Colors.white,
+                                    onPressed: () => context.push(
+                                      '/dashboard/owner/orders/$orderId?workshopId=${workshopInfo.id}',
+                                    ),
+                                  ),
+                                ),
+                              );
+                              context.push(
+                                '/dashboard/owner/orders/$orderId?workshopId=${workshopInfo.id}',
+                              );
+                            }
+                          } catch (e) {
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text('فشل إرسال الطلب: $e'),
+                                ),
+                              );
+                            }
+                          } finally {
+                            if (ctx.mounted) {
+                              setDialogState(() => isSending = false);
+                            }
+                          }
+                        },
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Future<void> _showSendWhatsAppWithPdfDialog({
+    required BuildContext context,
+    required WorkshopInfo workshopInfo,
+    required Project? project,
+    required List<RequirementLine> toBuyLines,
+  }) async {
+    final suppliers = ref.read(suppliersListProvider).value ?? [];
+    Supplier? selectedSupplier =
+        suppliers.isNotEmpty ? suppliers.first : null;
+    final phoneCtrl = TextEditingController(
+      text: selectedSupplier?.allWhatsappNumbers.isNotEmpty == true
+          ? selectedSupplier!.allWhatsappNumbers.first
+          : (selectedSupplier?.phone ?? ''),
+    );
+    final noteCtrl = TextEditingController();
+    var isProcessing = false;
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          return Directionality(
+            textDirection: TextDirection.rtl,
+            child: AlertDialog(
+              title: const Row(
+                children: [
+                  Icon(Icons.chat_rounded, color: AppColors.success),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'إرسال الاحتياجات وملف PDF عبر واتساب للمورد',
+                      style: TextStyle(fontSize: 16),
+                    ),
+                  ),
+                ],
+              ),
+              content: SizedBox(
+                width: 460,
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      if (suppliers.isNotEmpty) ...[
+                        DropdownButtonFormField<Supplier>(
+                          initialValue: selectedSupplier,
+                          decoration: const InputDecoration(
+                            labelText: 'اختر المورد',
+                            border: OutlineInputBorder(),
+                            prefixIcon: Icon(Icons.storefront_rounded),
+                          ),
+                          items: suppliers.map((s) {
+                            return DropdownMenuItem<Supplier>(
+                              value: s,
+                              child: Text(s.name),
+                            );
+                          }).toList(),
+                          onChanged: (val) {
+                            setDialogState(() {
+                              selectedSupplier = val;
+                              if (val != null) {
+                                phoneCtrl.text =
+                                    val.allWhatsappNumbers.isNotEmpty
+                                        ? val.allWhatsappNumbers.first
+                                        : val.phone;
+                              }
+                            });
+                          },
+                        ),
+                        const SizedBox(height: 12),
+                      ],
+                      TextField(
+                        controller: phoneCtrl,
+                        keyboardType: TextInputType.phone,
+                        decoration: const InputDecoration(
+                          labelText: 'رقم واتساب المورد *',
+                          hintText: '9665xxxxxxxx',
+                          border: OutlineInputBorder(),
+                          prefixIcon: Icon(Icons.phone_rounded),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: noteCtrl,
+                        maxLines: 2,
+                        decoration: const InputDecoration(
+                          labelText: 'ملاحظة مرفقة للمورد (اختياري)',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: AppColors.success.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Text(
+                          'يمكنك فتح محادثة واتساب مباشرة مع ملخص الطلب، أو مشاركة وإرفاق ملف PDF الرسمي للاحتياجات مباشرة إلى واتساب.',
+                          style: TextStyle(fontSize: 12),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: isProcessing ? null : () => Navigator.pop(ctx),
+                  child: const Text('إغلاق'),
+                ),
+                OutlinedButton.icon(
+                  icon: const Icon(Icons.picture_as_pdf_rounded, size: 18),
+                  label: const Text('مشاركة ملف PDF لواتساب'),
+                  onPressed: isProcessing
+                      ? null
+                      : () async {
+                          setDialogState(() => isProcessing = true);
+                          try {
+                            final projectName = project?.name ?? 'المشروع';
+                            final pdfBytes =
+                                await RequirementsPdfGenerator.generate(
+                                  workshopName: workshopInfo.name,
+                                  workshopPhone: workshopInfo.phone,
+                                  workshopLocation: workshopInfo.location,
+                                  projectName: projectName,
+                                  clientName: project?.clientName ?? '',
+                                  supplierName: selectedSupplier?.name,
+                                  generalNote: noteCtrl.text.trim(),
+                                  lines: toBuyLines,
+                                );
+                            await Printing.sharePdf(
+                              bytes: pdfBytes,
+                              filename:
+                                  'طلب_مواد_${projectName.replaceAll(" ", "_")}.pdf',
+                            );
+                          } finally {
+                            if (ctx.mounted) {
+                              setDialogState(() => isProcessing = false);
+                            }
+                          }
+                        },
+                ),
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.success,
+                    foregroundColor: Colors.white,
+                  ),
+                  icon: const Icon(Icons.chat_rounded, size: 18),
+                  label: const Text('فتح واتساب المورد + PDF'),
+                  onPressed: isProcessing
+                      ? null
+                      : () async {
+                          setDialogState(() => isProcessing = true);
+                          try {
+                            final projectName = project?.name ?? 'المشروع';
+                            final supplierName = selectedSupplier?.name ?? '';
+                            final rawPhone = phoneCtrl.text.trim();
+                            final cleanPhone =
+                                rawPhone.replaceAll(RegExp(r'[^0-9]'), '');
+
+                            // 1. Build formatted Arabic WhatsApp summary
+                            final buf = StringBuffer();
+                            buf.writeln(
+                              '*طلب تسعير وتوريد مواد — ${workshopInfo.name}*',
+                            );
+                            buf.writeln('المشروع: $projectName');
+                            if (supplierName.isNotEmpty) {
+                              buf.writeln('السادة: $supplierName');
+                            }
+                            buf.writeln('-------------------------');
+                            for (final item in toBuyLines) {
+                              final q = _formatQty(item.toBuyQty);
+                              final n = item.note.isNotEmpty
+                                  ? ' (${item.note})'
+                                  : '';
+                              buf.writeln(
+                                '• $q ${item.unitArabic} — ${item.nameArabic}$n',
+                              );
+                            }
+                            buf.writeln('-------------------------');
+                            if (noteCtrl.text.trim().isNotEmpty) {
+                              buf.writeln(
+                                'ملاحظة: ${noteCtrl.text.trim()}',
+                              );
+                            }
+                            if (workshopInfo.location.isNotEmpty) {
+                              buf.writeln('الموقع: ${workshopInfo.location}');
+                            }
+                            if (workshopInfo.phone.isNotEmpty) {
+                              buf.writeln('هاتف الورشة: ${workshopInfo.phone}');
+                            }
+
+                            final encoded =
+                                Uri.encodeComponent(buf.toString().trim());
+                            final uri = Uri.parse(
+                              'https://wa.me/$cleanPhone?text=$encoded',
+                            );
+                            await launchUrl(
+                              uri,
+                              mode: LaunchMode.externalApplication,
+                            );
+
+                            // 2. Also generate and share/download the PDF so the owner has it ready
+                            final pdfBytes =
+                                await RequirementsPdfGenerator.generate(
+                                  workshopName: workshopInfo.name,
+                                  workshopPhone: workshopInfo.phone,
+                                  workshopLocation: workshopInfo.location,
+                                  projectName: projectName,
+                                  clientName: project?.clientName ?? '',
+                                  supplierName: supplierName,
+                                  generalNote: noteCtrl.text.trim(),
+                                  lines: toBuyLines,
+                                );
+                            await Printing.sharePdf(
+                              bytes: pdfBytes,
+                              filename:
+                                  'طلب_مواد_${projectName.replaceAll(" ", "_")}.pdf',
+                            );
+                          } finally {
+                            if (ctx.mounted) {
+                              setDialogState(() => isProcessing = false);
+                            }
+                          }
+                        },
                 ),
               ],
             ),

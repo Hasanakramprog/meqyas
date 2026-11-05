@@ -17,8 +17,10 @@ class PurchaseOrderPdfGenerator {
     _boldFont = pw.Font.ttf(boldData);
   }
 
-  /// Generates an Arabic RTL Purchase Order PDF (Spec §11 & §12).
-  /// Never modifies stock balances.
+  static String _fmt(double v) =>
+      v == v.roundToDouble() ? v.toInt().toString() : v.toStringAsFixed(2);
+
+  /// Generates an Arabic RTL Purchase Order / Supplier Quote PDF.
   static Future<Uint8List> generatePurchaseOrderPdf(OrderModel order) async {
     await _ensureFontsLoaded();
     final regular = _regularFont!;
@@ -63,10 +65,10 @@ class PurchaseOrderPdfGenerator {
                   crossAxisAlignment: pw.CrossAxisAlignment.start,
                   children: [
                     pw.Text(
-                      'أمر شراء وتوريد مواد (Purchase Order)',
+                      'طلب وعرض سعر توريد مواد (Purchase Order)',
                       style: pw.TextStyle(
                         font: bold,
-                        fontSize: 16,
+                        fontSize: 15,
                         color: PdfColors.amber300,
                       ),
                     ),
@@ -78,6 +80,14 @@ class PurchaseOrderPdfGenerator {
                         color: PdfColors.white,
                       ),
                     ),
+                    if (order.projectName.isNotEmpty)
+                      pw.Text(
+                        'المشروع: ${order.projectName}',
+                        style: const pw.TextStyle(
+                          fontSize: 10.5,
+                          color: PdfColors.amber100,
+                        ),
+                      ),
                     if (order.workshopLocation.isNotEmpty ||
                         order.workshopPhone.isNotEmpty)
                       pw.Text(
@@ -137,7 +147,7 @@ class PurchaseOrderPdfGenerator {
                   style: pw.TextStyle(font: bold, fontSize: 12),
                 ),
                 pw.Text(
-                  'عدد البنود: ${order.items.length}',
+                  'إجمالي البنود: ${order.items.length} (المتوفر: ${order.availableItemsCount})',
                   style: const pw.TextStyle(fontSize: 11),
                 ),
               ],
@@ -150,39 +160,43 @@ class PurchaseOrderPdfGenerator {
             context: context,
             border: pw.TableBorder.all(color: PdfColors.grey400, width: 0.6),
             headerDecoration: const pw.BoxDecoration(color: PdfColors.grey200),
-            headerStyle: pw.TextStyle(font: bold, fontSize: 10),
-            cellStyle: const pw.TextStyle(fontSize: 10),
+            headerStyle: pw.TextStyle(font: bold, fontSize: 9.5),
+            cellStyle: const pw.TextStyle(fontSize: 9.5),
             cellAlignment: pw.Alignment.centerRight,
             headers: [
               'الإجمالي',
               'سعر الوحدة',
+              'المتوفر لدى المورد',
+              'المطلوب',
               'الوحدة',
-              'الكمية',
-              'المشروع / ملاحظة',
+              'ملاحظات الورشة / المورد',
               'الصنف والوصف',
               '#',
             ],
             data: List.generate(order.items.length, (index) {
               final item = order.items[index];
-              final qtyStr = item.qty == item.qty.roundToDouble()
-                  ? item.qty.toInt().toString()
-                  : item.qty.toStringAsFixed(2);
-              final priceStr = item.unitPrice > 0
+              final reqStr = _fmt(item.requestedQty);
+              final suppliedStr = !item.isAvailable
+                  ? 'غير متوفر (0)'
+                  : _fmt(item.qty);
+              final priceStr = item.isAvailable && item.unitPrice > 0
                   ? '${item.unitPrice.toStringAsFixed(2)} ${order.currency}'
                   : '-';
-              final totalStr = item.lineTotal > 0
+              final totalStr = item.isAvailable && item.lineTotal > 0
                   ? '${item.lineTotal.toStringAsFixed(2)} ${order.currency}'
                   : '-';
               final noteStr = [
-                if (item.projectName.isNotEmpty) item.projectName,
                 if (item.note.isNotEmpty) item.note,
-              ].join(' — ');
+                if (item.supplierNote.isNotEmpty)
+                  'رد المورد: ${item.supplierNote}',
+              ].join(' | ');
 
               return [
                 totalStr,
                 priceStr,
+                suppliedStr,
+                reqStr,
                 CatalogUnit.arabicLabel(item.unit),
-                qtyStr,
                 noteStr.isEmpty ? '-' : noteStr,
                 item.nameArabic,
                 '${index + 1}',
@@ -205,14 +219,14 @@ class PurchaseOrderPdfGenerator {
                   borderRadius: pw.BorderRadius.circular(6),
                 ),
                 child: pw.Text(
-                  'الإجمالي الكلي: ${order.computedTotal.toStringAsFixed(2)} ${order.currency}',
+                  'الإجمالي الكلي للتسعيرة: ${order.computedTotal.toStringAsFixed(2)} ${order.currency}',
                   style: pw.TextStyle(font: bold, fontSize: 12),
                 ),
               ),
             ),
 
           if (order.notes.isNotEmpty) ...[
-            pw.SizedBox(height: 12),
+            pw.SizedBox(height: 10),
             pw.Container(
               width: double.infinity,
               padding: const pw.EdgeInsets.all(10),
@@ -221,8 +235,24 @@ class PurchaseOrderPdfGenerator {
                 borderRadius: pw.BorderRadius.circular(6),
               ),
               child: pw.Text(
-                'ملاحظات وشروط التوريد: ${order.notes}',
+                'ملاحظات الورشة: ${order.notes}',
                 style: const pw.TextStyle(fontSize: 10),
+              ),
+            ),
+          ],
+
+          if (order.supplierResponseNote.isNotEmpty) ...[
+            pw.SizedBox(height: 8),
+            pw.Container(
+              width: double.infinity,
+              padding: const pw.EdgeInsets.all(10),
+              decoration: pw.BoxDecoration(
+                color: PdfColors.amber50,
+                borderRadius: pw.BorderRadius.circular(6),
+              ),
+              child: pw.Text(
+                'ملاحظات ورد المورد: ${order.supplierResponseNote}',
+                style: pw.TextStyle(font: bold, fontSize: 10),
               ),
             ),
           ],
@@ -233,4 +263,3 @@ class PurchaseOrderPdfGenerator {
     return doc.save();
   }
 }
-

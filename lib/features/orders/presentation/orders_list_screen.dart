@@ -38,16 +38,15 @@ class _OrdersListScreenState extends ConsumerState<OrdersListScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('طلبات التوريد وأوامر الشراء'),
+        title: const Text('طلبات التوريد وعروض أسعار الموردين'),
         actions: [
           IconButton(
-            tooltip: 'سلة الاحتياجات',
+            tooltip: 'دليل الموردين',
             icon: const Icon(
-              Icons.shopping_cart_outlined,
+              Icons.storefront_outlined,
               color: AppColors.amberPrimary,
             ),
-            onPressed: () =>
-                context.push('/dashboard/owner/cart?workshopId=$workshopId'),
+            onPressed: () => context.push('/dashboard/owner/suppliers'),
           ),
         ],
       ),
@@ -180,12 +179,32 @@ class _OrdersListScreenState extends ConsumerState<OrdersListScreen> {
                 ],
               ),
               const SizedBox(height: 8),
+              if (order.projectName.trim().isNotEmpty) ...[
+                Row(
+                  children: [
+                    const Icon(
+                      Icons.folder_outlined,
+                      size: 14,
+                      color: AppColors.amberPrimary,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      'المشروع: ${order.projectName}',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+              ],
               Wrap(
                 spacing: 16,
                 runSpacing: 4,
                 children: [
                   Text(
-                    'عدد الأصناف: ${order.items.length}',
+                    'المتوفر: ${order.availableItemsCount}/${order.items.length} صنف',
                     style: const TextStyle(
                       fontSize: 12,
                       color: AppColors.slate400,
@@ -209,6 +228,18 @@ class _OrdersListScreenState extends ConsumerState<OrdersListScreen> {
                   ),
                 ],
               ),
+              if (order.supplierResponseNote.trim().isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Text(
+                  'ملاحظة المورد: ${order.supplierResponseNote}',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    color: AppColors.glassBlueLight,
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
             ],
           ),
         ),
@@ -222,6 +253,8 @@ class _OrdersListScreenState extends ConsumerState<OrdersListScreen> {
         return AppColors.slate400;
       case OrderStatus.sent:
         return AppColors.glassBlueLight;
+      case OrderStatus.quoted:
+        return AppColors.amberPrimary;
       case OrderStatus.confirmed:
         return AppColors.success;
       case OrderStatus.preparing:

@@ -13,11 +13,8 @@ class SupplierDashboardScreen extends StatelessWidget {
 
     return Scaffold(
       appBar: AppBar(
+        automaticallyImplyLeading: false,
         title: const Text('بوابة المورد'),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_rounded),
-          onPressed: () => context.go('/'),
-        ),
         actions: [
           IconButton(
             tooltip: 'تسجيل الخروج',
@@ -66,53 +63,40 @@ class SupplierDashboardScreen extends StatelessWidget {
                               'شركة التوريدات الوطنية للألمنيوم والملحقات',
                               style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
                             ),
-                            const SizedBox(height: 4),
-                            Text(
-                              'الطلبات الواردة • تسعير الأصناف • إدارة المخزون والأرصدة',
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: isDark ? AppColors.slate400 : AppColors.slate600,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 24),
-                Text('إدارة التوريد والمبيعات', style: theme.textTheme.titleLarge),
-                const SizedBox(height: 12),
-                _buildSupplierGrid(context, isDark),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
+                             const SizedBox(height: 4),
+                             Text(
+                               'استقبال طلبات الورش • تحديد التوفر والكميات • التسعير اليدوي وإرسال العروض',
+                               style: theme.textTheme.bodySmall?.copyWith(
+                                 color: isDark ? AppColors.slate400 : AppColors.slate600,
+                               ),
+                             ),
+                           ],
+                         ),
+                       ),
+                     ],
+                   ),
+                 ),
+                 const SizedBox(height: 24),
+                 Text('إدارة الطلبات والتسعير', style: theme.textTheme.titleLarge),
+                 const SizedBox(height: 12),
+                 _buildSupplierGrid(context, isDark),
+               ],
+             ),
+           ),
+         ),
+       ),
+     );
+   }
 
   Widget _buildSupplierGrid(BuildContext context, bool isDark) {
     final items = [
       {
-        'title': 'الطلبات الواردة',
-        'desc': 'مراجعة طلبات الورش وتأكيد الاستلام وخصم المخزون',
-        'icon': Icons.inbox_rounded,
+        'title': 'الطلبات الواردة من الورش وتسعيرها',
+        'desc':
+            'مراجعة طلبات الورش، تحديد توفر الأصناف، تعديل الكميات المتوفرة، إدخال الأسعار يدوياً وإرسال التسعيرة للورشة',
+        'icon': Icons.request_quote_rounded,
         'color': AppColors.glassBlue,
         'route': '/dashboard/supplier/orders',
-      },
-      {
-        'title': 'قائمة الأسعار',
-        'desc': 'تعديل أسعار المقاطع والزجاج والإكسسوارات وسجل الأسعار',
-        'icon': Icons.price_change_outlined,
-        'color': AppColors.amberPrimary,
-        'route': '/dashboard/supplier/prices',
-      },
-      {
-        'title': 'المستودع والمخزون',
-        'desc': 'أرصدة القضبان واللفات وتغذية المخزون وسجل الحركات',
-        'icon': Icons.inventory_2_outlined,
-        'color': AppColors.success,
-        'route': '/dashboard/supplier/stock',
       },
     ];
 

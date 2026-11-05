@@ -11,12 +11,30 @@ service cloud.firestore {
       return request.auth.token;
     }
     
+    function userDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+    
     function role() {
-      return userToken().role;
+      return ('role' in userToken() && userToken().role != null)
+        ? userToken().role
+        : userDoc().role;
+    }
+    
+    function userWorkshopId() {
+      return ('workshopId' in userToken() && userToken().workshopId != null)
+        ? userToken().workshopId
+        : userDoc().workshopId;
+    }
+
+    function userSupplierId() {
+      return ('supplierId' in userToken() && userToken().supplierId != null)
+        ? userToken().supplierId
+        : userDoc().supplierId;
     }
     
     function isActive() {
-      return isSignedIn() && userToken().status != 'disabled';
+      return isSignedIn() && (!('status' in userToken()) || userToken().status != 'disabled');
     }
     
     function isAdmin() {
@@ -25,25 +43,50 @@ service cloud.firestore {
     
     function isOwnerOf(workshopId) {
       return isActive() && role() == 'owner' && (
-        userToken().workshopId == workshopId ||
+        userWorkshopId() == workshopId ||
         get(/databases/$(database)/documents/workshops/$(workshopId)).data.ownerUid == request.auth.uid
       );
     }
     
     function isSupplier(supplierId) {
-      return isActive() && role() == 'supplier' && userToken().supplierId == supplierId;
+      return isActive() && role() == 'supplier' && userSupplierId() == supplierId;
     }
 
     // Users collection
     match /users/{uid} {
-      allow read: if isSignedIn() && (request.auth.uid == uid || isAdmin());
-      // Status and role are strictly set by Cloud Functions
-      allow write: if false;
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && (request.auth.uid == uid || isAdmin());
+      allow update: if isSignedIn() && (
+        isAdmin() || (
+          request.auth.uid == uid && (
+            !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'status']) ||
+            (request.resource.data.role == resource.data.role && request.resource.data.status == resource.data.status)
+          )
+        )
+      );
+      allow delete: if isAdmin();
+
+      match /notifications/{notificationId} {
+        allow read, update, delete: if isSignedIn() && (request.auth.uid == uid || isAdmin());
+        allow create: if isSignedIn() &&
+          request.resource.data.recipientUid == uid &&
+          request.resource.data.title is string &&
+          request.resource.data.body is string &&
+          request.resource.data.isRead is bool;
+      }
     }
 
     // Workshops and their subcollections
     match /workshops/{workshopId} {
-      allow read, write: if (isActive() && role() == 'owner' && (userToken().workshopId == workshopId || resource.data.ownerUid == request.auth.uid)) || isAdmin();
+      allow read: if isSignedIn();
+      allow write: if (
+        isActive() && role() == 'owner' && (
+          userWorkshopId() == workshopId ||
+          resource == null ||
+          resource.data.ownerUid == request.auth.uid ||
+          request.resource.data.ownerUid == request.auth.uid
+        )
+      ) || isAdmin();
 
       match /{subcollection=**} {
         allow read, write: if isOwnerOf(workshopId) || isAdmin();
@@ -61,11 +104,8 @@ service cloud.firestore {
       allow read: if isSignedIn() && (
         resource.data.status in ['approved', 'archived'] || isAdmin()
       );
-      // Admin client writes drafts; transitions to approved/archived are Cloud Function only
-      allow create: if isAdmin() && request.resource.data.status == 'draft';
-      allow update: if isAdmin() && (
-        request.resource.data.status == 'draft' || resource.data.status == 'draft'
-      );
+      // Admin client writes rules across valid statuses (supports Spark plan without Cloud Functions)
+      allow create, update: if isAdmin() && request.resource.data.status in ['draft', 'approved', 'archived'];
       allow delete: if isAdmin() && resource.data.status == 'draft';
     }
 
@@ -120,30 +160,40 @@ service cloud.firestore {
         isSupplier(resource.data.supplierId) ||
         isAdmin()
       );
-      // Status confirmation and inventory deductions are server-only (via confirmOrder Cloud Function)
       allow create: if isSignedIn() &&
         (isOwnerOf(request.resource.data.workshopId) || isAdmin()) &&
         request.resource.data.status in ['draft', 'sent'];
-      allow update: if isSignedIn() &&
-        request.resource.data.status != 'confirmed' && (
-          isAdmin() ||
-          (
-            isOwnerOf(resource.data.workshopId) &&
-            resource.data.status in ['draft', 'sent'] &&
-            request.resource.data.status in ['draft', 'sent', 'cancelled'] &&
-            request.resource.data.workshopId == resource.data.workshopId
-          ) ||
-          (
-            isSupplier(resource.data.supplierId) &&
-            resource.data.status == 'sent' &&
-            request.resource.data.status in ['sent', 'cancelled'] &&
-            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'statusHistory', 'updatedAt'])
-          )
-        );
+      allow update: if isSignedIn() && (
+        isAdmin() ||
+        (
+          isOwnerOf(resource.data.workshopId) &&
+          request.resource.data.workshopId == resource.data.workshopId &&
+          resource.data.status in ['draft', 'sent', 'quoted'] &&
+          request.resource.data.status in ['draft', 'sent', 'quoted', 'confirmed', 'cancelled']
+        ) ||
+        (
+          isSupplier(resource.data.supplierId) &&
+          request.resource.data.supplierId == resource.data.supplierId &&
+          request.resource.data.workshopId == resource.data.workshopId &&
+          resource.data.status in ['sent', 'quoted', 'confirmed', 'preparing'] &&
+          request.resource.data.status in ['sent', 'quoted', 'confirmed', 'preparing', 'completed', 'cancelled'] &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'items',
+            'totalAmount',
+            'supplierResponseNote',
+            'notes',
+            'status',
+            'statusHistory',
+            'confirmedBy',
+            'confirmedAt',
+            'updatedAt'
+          ])
+        )
+      );
       allow delete: if isAdmin() || (
         isSignedIn() &&
         isOwnerOf(resource.data.workshopId) &&
-        resource.data.status == 'draft'
+        resource.data.status in ['draft', 'sent', 'cancelled']
       );
     }
 

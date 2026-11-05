@@ -16,6 +16,7 @@ class FirebaseAuthRepository implements AuthRepository {
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _userDocSubscription;
   final _authStateController = StreamController<AppUser?>.broadcast();
   AppUser? _currentUser;
+  bool _hasEmittedInitial = false;
 
   FirebaseAuthRepository({
     FirebaseAuth? auth,
@@ -27,6 +28,14 @@ class FirebaseAuthRepository implements AuthRepository {
     _initAuthListener();
   }
 
+  void _emitAuthState(AppUser? user) {
+    _currentUser = user;
+    _hasEmittedInitial = true;
+    if (!_authStateController.isClosed) {
+      _authStateController.add(user);
+    }
+  }
+
   void _initAuthListener() {
     try {
       _authSubscription = _auth.authStateChanges().listen((firebaseUser) async {
@@ -34,8 +43,7 @@ class FirebaseAuthRepository implements AuthRepository {
           _userDocSubscription?.cancel();
 
           if (firebaseUser == null) {
-            _currentUser = null;
-            _authStateController.add(null);
+            _emitAuthState(null);
             return;
           }
 
@@ -44,26 +52,59 @@ class FirebaseAuthRepository implements AuthRepository {
           String? supplierId;
 
           try {
-            final tokenResult = await firebaseUser.getIdTokenResult(true);
+            // Read cached token claims first so persisted sessions restore immediately
+            final tokenResult = await firebaseUser.getIdTokenResult(false);
             roleStr = tokenResult.claims?['role'] as String?;
             workshopId = tokenResult.claims?['workshopId'] as String?;
             supplierId = tokenResult.claims?['supplierId'] as String?;
           } catch (e) {
-            debugPrint('Failed to refresh ID token claims: $e');
+            debugPrint('Failed to read cached ID token claims: $e');
           }
 
-          // Initial fallback user before Firestore doc arrives
-          _currentUser = AppUser(
-            uid: firebaseUser.uid,
-            email: firebaseUser.email ?? '',
-            fullName: firebaseUser.displayName ?? '',
-            phone: '',
-            isEmailVerified: firebaseUser.emailVerified,
-            role: UserRole.fromCode(roleStr),
-            workshopId: workshopId,
-            supplierId: supplierId,
-          );
-          _authStateController.add(_currentUser);
+          // Fetch initial users/{uid} document first so role, workshopId/supplierId,
+          // and isEmailVerified are accurate on Cloud Firebase even without custom claims
+          try {
+            final initialDoc = await _firestore
+                .collection('users')
+                .doc(firebaseUser.uid)
+                .get();
+            if (initialDoc.exists && initialDoc.data() != null) {
+              _emitAuthState(
+                AppUser.fromMap(
+                  initialDoc.data()!,
+                  firebaseUser.uid,
+                  isEmailVerified: firebaseUser.emailVerified,
+                ),
+              );
+            } else {
+              _emitAuthState(
+                AppUser(
+                  uid: firebaseUser.uid,
+                  email: firebaseUser.email ?? '',
+                  fullName: firebaseUser.displayName ?? '',
+                  phone: '',
+                  isEmailVerified: firebaseUser.emailVerified,
+                  role: UserRole.fromCode(roleStr),
+                  workshopId: workshopId,
+                  supplierId: supplierId,
+                ),
+              );
+            }
+          } catch (e) {
+            debugPrint('Initial user doc fetch notice: $e');
+            _emitAuthState(
+              AppUser(
+                uid: firebaseUser.uid,
+                email: firebaseUser.email ?? '',
+                fullName: firebaseUser.displayName ?? '',
+                phone: '',
+                isEmailVerified: firebaseUser.emailVerified,
+                role: UserRole.fromCode(roleStr),
+                workshopId: workshopId,
+                supplierId: supplierId,
+              ),
+            );
+          }
 
           // Listen to users/{uid} document in Firestore
           _userDocSubscription = _firestore
@@ -80,7 +121,7 @@ class FirebaseAuthRepository implements AuthRepository {
                   isEmailVerified: firebaseUser.emailVerified,
                 );
               }
-              _authStateController.add(_currentUser);
+              _emitAuthState(_currentUser);
             },
             onError: (error) {
               debugPrint('Firestore user doc listen error: $error');
@@ -96,7 +137,19 @@ class FirebaseAuthRepository implements AuthRepository {
   }
 
   @override
-  Stream<AppUser?> authState() => _authStateController.stream;
+  Stream<AppUser?> authState() {
+    return Stream<AppUser?>.multi((controller) {
+      if (_hasEmittedInitial) {
+        controller.add(_currentUser);
+      }
+      final sub = _authStateController.stream.listen(
+        controller.add,
+        onError: controller.addError,
+        onDone: controller.close,
+      );
+      controller.onCancel = sub.cancel;
+    });
+  }
 
   @override
   AppUser? get currentUser => _currentUser;
@@ -123,16 +176,46 @@ class FirebaseAuthRepository implements AuthRepository {
       // In local emulator, continue even if mailer service mock throws
     }
 
-    // 3. Call bootstrapOwner Cloud Function (creates workshop, user doc, sets claims)
-    final callable = _functions.httpsCallable('bootstrapOwner');
-    await callable.call({
-      'fullName': data.fullName.trim(),
-      'phone': data.phone.trim(),
-      'workshopName': data.workshopName.trim(),
-      'workshopLocation': data.workshopLocation.trim(),
-    });
+    // 3. Call bootstrapOwner Cloud Function (or fall back to direct Firestore bootstrap on Spark plan)
+    try {
+      final callable = _functions.httpsCallable('bootstrapOwner');
+      await callable.call({
+        'fullName': data.fullName.trim(),
+        'phone': data.phone.trim(),
+        'workshopName': data.workshopName.trim(),
+        'workshopLocation': data.workshopLocation.trim(),
+      });
+    } catch (e) {
+      debugPrint('bootstrapOwner Cloud Function unavailable, using direct Firestore bootstrap: $e');
+      final workshopRef = _firestore.collection('workshops').doc();
+      final batch = _firestore.batch();
+      batch.set(workshopRef, {
+        'id': workshopRef.id,
+        'name': data.workshopName.trim(),
+        'ownerUid': user.uid,
+        'phone': data.phone.trim(),
+        'location': data.workshopLocation.trim(),
+        'status': 'active',
+        'createdAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      batch.set(_firestore.collection('users').doc(user.uid), {
+        'uid': user.uid,
+        'email': data.email.trim(),
+        'fullName': data.fullName.trim(),
+        'phone': data.phone.trim(),
+        'isEmailVerified': user.emailVerified,
+        'role': 'owner',
+        'status': 'active',
+        'workshopId': workshopRef.id,
+        'supplierId': null,
+        'createdAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      await batch.commit();
+    }
 
-    // 4. Force token refresh to capture the newly set custom claims
+    // 4. Force token refresh to capture any custom claims
     await user.getIdToken(true);
   }
 

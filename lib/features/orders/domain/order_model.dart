@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 enum OrderStatus {
   draft,
   sent,
+  quoted,
   confirmed,
   preparing,
   completed,
@@ -13,9 +14,11 @@ enum OrderStatus {
       case OrderStatus.draft:
         return 'مسودة';
       case OrderStatus.sent:
-        return 'مُرسل للمورد';
+        return 'مرسل للمورد (بانتظار الرد)';
+      case OrderStatus.quoted:
+        return 'تم التسعير والرد من المورد';
       case OrderStatus.confirmed:
-        return 'مؤكد (تم خصم المخزون)';
+        return 'معتمد ومؤكد';
       case OrderStatus.preparing:
         return 'قيد التجهيز';
       case OrderStatus.completed:
@@ -36,55 +39,113 @@ enum OrderStatus {
 class OrderLineItem {
   final String itemId;
   final String nameArabic;
+  final String category;
+  final double requestedQty;
   final double qty;
+  final bool isAvailable;
   final String unit;
   final double unitPrice;
   final String projectId;
   final String projectName;
   final String unitId;
   final String note;
+  final String supplierNote;
 
   const OrderLineItem({
     required this.itemId,
     required this.nameArabic,
+    this.category = 'aluminum',
+    double? requestedQty,
     required this.qty,
+    this.isAvailable = true,
     required this.unit,
     this.unitPrice = 0.0,
     this.projectId = '',
     this.projectName = '',
     this.unitId = '',
     this.note = '',
-  });
+    this.supplierNote = '',
+  }) : requestedQty = requestedQty ?? qty;
 
-  double get lineTotal => qty * unitPrice;
+  double get effectiveQty => isAvailable ? qty : 0.0;
+
+  double get lineTotal => effectiveQty * unitPrice;
+
+  bool get isQuantityModified =>
+      isAvailable && (qty - requestedQty).abs() > 0.001;
+
+  OrderLineItem copyWith({
+    String? itemId,
+    String? nameArabic,
+    String? category,
+    double? requestedQty,
+    double? qty,
+    bool? isAvailable,
+    String? unit,
+    double? unitPrice,
+    String? projectId,
+    String? projectName,
+    String? unitId,
+    String? note,
+    String? supplierNote,
+  }) {
+    return OrderLineItem(
+      itemId: itemId ?? this.itemId,
+      nameArabic: nameArabic ?? this.nameArabic,
+      category: category ?? this.category,
+      requestedQty: requestedQty ?? this.requestedQty,
+      qty: qty ?? this.qty,
+      isAvailable: isAvailable ?? this.isAvailable,
+      unit: unit ?? this.unit,
+      unitPrice: unitPrice ?? this.unitPrice,
+      projectId: projectId ?? this.projectId,
+      projectName: projectName ?? this.projectName,
+      unitId: unitId ?? this.unitId,
+      note: note ?? this.note,
+      supplierNote: supplierNote ?? this.supplierNote,
+    );
+  }
 
   Map<String, dynamic> toMap() {
     return {
       'itemId': itemId,
       'nameArabic': nameArabic,
       'name': nameArabic,
-      'qty': qty,
+      'category': category,
+      'requestedQty': requestedQty,
+      'qty': isAvailable ? qty : 0.0,
+      'isAvailable': isAvailable,
       'unit': unit,
       'unitPrice': unitPrice,
       'projectId': projectId,
       'projectName': projectName,
       'unitId': unitId,
       'note': note,
+      'supplierNote': supplierNote,
     };
   }
 
   factory OrderLineItem.fromMap(Map<String, dynamic> map) {
+    final parsedQty = (map['qty'] as num?)?.toDouble() ?? 1.0;
+    final parsedReqQty =
+        (map['requestedQty'] as num?)?.toDouble() ?? parsedQty;
+    final parsedAvail = map['isAvailable'] as bool? ?? true;
+
     return OrderLineItem(
       itemId: map['itemId'] as String? ?? '',
       nameArabic:
           map['nameArabic'] as String? ?? (map['name'] as String? ?? ''),
-      qty: (map['qty'] as num?)?.toDouble() ?? 1.0,
+      category: map['category'] as String? ?? 'aluminum',
+      requestedQty: parsedReqQty,
+      qty: parsedQty,
+      isAvailable: parsedAvail,
       unit: map['unit'] as String? ?? 'piece',
       unitPrice: (map['unitPrice'] as num?)?.toDouble() ?? 0.0,
       projectId: map['projectId'] as String? ?? '',
       projectName: map['projectName'] as String? ?? '',
       unitId: map['unitId'] as String? ?? '',
       note: map['note'] as String? ?? '',
+      supplierNote: map['supplierNote'] as String? ?? '',
     );
   }
 }
@@ -130,9 +191,12 @@ class OrderModel {
   final String workshopLocation;
   final String supplierId;
   final String supplierName;
+  final String projectId;
+  final String projectName;
   final OrderStatus status;
   final List<OrderLineItem> items;
   final String notes;
+  final String supplierResponseNote;
   final String idempotencyKey;
   final double totalAmount;
   final String currency;
@@ -151,9 +215,12 @@ class OrderModel {
     this.workshopLocation = '',
     required this.supplierId,
     this.supplierName = '',
+    this.projectId = '',
+    this.projectName = '',
     this.status = OrderStatus.draft,
     required this.items,
     this.notes = '',
+    this.supplierResponseNote = '',
     required this.idempotencyKey,
     this.totalAmount = 0.0,
     this.currency = 'SAR',
@@ -172,6 +239,11 @@ class OrderModel {
   double get computedTotal =>
       items.fold<double>(0.0, (acc, item) => acc + item.lineTotal);
 
+  int get availableItemsCount => items.where((i) => i.isAvailable && i.qty > 0).length;
+
+  int get unavailableItemsCount =>
+      items.where((i) => !i.isAvailable || i.qty <= 0).length;
+
   /// Formats an Arabic WhatsApp order summary (Spec §11).
   String buildWhatsAppMessage() {
     final buffer = StringBuffer();
@@ -179,25 +251,41 @@ class OrderModel {
       '*طلب توريد مواد — ${workshopName.isNotEmpty ? workshopName : "ورشة ألمنيوم"}*',
     );
     buffer.writeln('رقم الطلب: $orderNumber');
+    if (projectName.isNotEmpty) {
+      buffer.writeln('المشروع: $projectName');
+    }
     if (supplierName.isNotEmpty) {
       buffer.writeln('المورد: $supplierName');
     }
     buffer.writeln('-------------------------');
     for (final item in items) {
-      final qtyStr = item.qty == item.qty.roundToDouble()
-          ? item.qty.toInt().toString()
-          : item.qty.toStringAsFixed(2);
+      final q = item.isAvailable ? item.qty : item.requestedQty;
+      final qtyStr = q == q.roundToDouble()
+          ? q.toInt().toString()
+          : q.toStringAsFixed(2);
+      final availTag = !item.isAvailable ? ' [غير متوفر]' : '';
+      final priceTag = item.unitPrice > 0
+          ? ' — السعر: ${item.unitPrice.toStringAsFixed(2)} $currency'
+          : '';
       final noteSuffix = item.note.isNotEmpty ? ' (${item.note})' : '';
-      buffer.writeln('• $qtyStr ${item.unit} — ${item.nameArabic}$noteSuffix');
+      final supNoteSuffix = item.supplierNote.isNotEmpty
+          ? ' [رد المورد: ${item.supplierNote}]'
+          : '';
+      buffer.writeln(
+        '• $qtyStr ${item.unit} — ${item.nameArabic}$availTag$priceTag$noteSuffix$supNoteSuffix',
+      );
     }
     buffer.writeln('-------------------------');
     if (computedTotal > 0) {
       buffer.writeln(
-        'الإجمالي التقديري: ${computedTotal.toStringAsFixed(2)} $currency',
+        'الإجمالي الكلي: ${computedTotal.toStringAsFixed(2)} $currency',
       );
     }
     if (notes.isNotEmpty) {
-      buffer.writeln('ملاحظات: $notes');
+      buffer.writeln('ملاحظات الورشة: $notes');
+    }
+    if (supplierResponseNote.isNotEmpty) {
+      buffer.writeln('رد وملاحظات المورد: $supplierResponseNote');
     }
     if (workshopLocation.isNotEmpty) {
       buffer.writeln('الموقع: $workshopLocation');
@@ -223,9 +311,12 @@ class OrderModel {
       'workshopLocation': workshopLocation,
       'supplierId': supplierId,
       'supplierName': supplierName,
+      'projectId': projectId,
+      'projectName': projectName,
       'status': status.name,
       'items': items.map((i) => i.toMap()).toList(),
       'notes': notes,
+      'supplierResponseNote': supplierResponseNote,
       'idempotencyKey': idempotencyKey,
       'totalAmount': computedTotal,
       'currency': currency,
@@ -260,6 +351,10 @@ class OrderModel {
             .toList()
         : <OrderStatusHistoryEntry>[];
 
+    final firstProjId = itemsList.isNotEmpty ? itemsList.first.projectId : '';
+    final firstProjName =
+        itemsList.isNotEmpty ? itemsList.first.projectName : '';
+
     return OrderModel(
       id: docId ?? (map['id'] as String? ?? ''),
       orderNumber: map['orderNumber'] as String? ?? 'PO-0000',
@@ -269,9 +364,12 @@ class OrderModel {
       workshopLocation: map['workshopLocation'] as String? ?? '',
       supplierId: map['supplierId'] as String? ?? '',
       supplierName: map['supplierName'] as String? ?? '',
+      projectId: map['projectId'] as String? ?? firstProjId,
+      projectName: map['projectName'] as String? ?? firstProjName,
       status: OrderStatus.fromString(map['status'] as String?),
       items: itemsList,
       notes: map['notes'] as String? ?? '',
+      supplierResponseNote: map['supplierResponseNote'] as String? ?? '',
       idempotencyKey: map['idempotencyKey'] as String? ?? '',
       totalAmount: (map['totalAmount'] as num?)?.toDouble() ?? 0.0,
       currency: map['currency'] as String? ?? 'SAR',
@@ -283,5 +381,3 @@ class OrderModel {
     );
   }
 }
-
-

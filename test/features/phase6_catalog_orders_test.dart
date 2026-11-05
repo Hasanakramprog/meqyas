@@ -258,5 +258,58 @@ void main() {
       expect(mergedManual.nameArabic, equals('سيليكون شفاف خارجي'));
       expect(mergedManual.toBuyQty, equals(5));
     });
+
+    test('Supplier interactive quote: availability toggle, modified qty & manual pricing', () {
+      const itemAvailableModified = OrderLineItem(
+        itemId: 'cat_al_track_2000',
+        nameArabic: 'سكة 2000 بحاجب',
+        category: 'aluminum',
+        requestedQty: 10,
+        qty: 8, // Supplier modified available quantity from 10 -> 8
+        unit: 'bar',
+        isAvailable: true,
+        unitPrice: 150, // Manual unit price
+        supplierNote: 'متوفر 8 قضبان حالياً',
+      );
+
+      const itemUnavailable = OrderLineItem(
+        itemId: 'cat_acc_handle',
+        nameArabic: 'مقبض درفة زجاج',
+        category: 'accessories',
+        requestedQty: 12,
+        qty: 12,
+        unit: 'piece',
+        isAvailable: false, // Marked unavailable by supplier
+        unitPrice: 25,
+        supplierNote: 'غير متوفر حالياً',
+      );
+
+      expect(itemAvailableModified.isQuantityModified, isTrue);
+      expect(itemAvailableModified.effectiveQty, equals(8));
+      expect(itemAvailableModified.lineTotal, equals(1200.0));
+
+      expect(itemUnavailable.effectiveQty, equals(0));
+      expect(itemUnavailable.lineTotal, equals(0.0));
+
+      const quotedOrder = OrderModel(
+        id: 'ord_quote_1',
+        orderNumber: 'PO-2026-QT001',
+        projectId: 'p1',
+        projectName: 'مشروع برج النخيل',
+        workshopId: 'w1',
+        workshopName: 'ورشة النور للألمنيوم',
+        supplierId: 'sup_1',
+        supplierName: 'شركة التوريدات الوطنية',
+        status: OrderStatus.quoted,
+        idempotencyKey: 'idem_qt_1',
+        items: [itemAvailableModified, itemUnavailable],
+        supplierResponseNote: 'الأسعار شاملة التوصيل للورشة خلال يومين',
+      );
+
+      expect(quotedOrder.availableItemsCount, equals(1));
+      expect(quotedOrder.unavailableItemsCount, equals(1));
+      expect(quotedOrder.computedTotal, equals(1200.0));
+      expect(quotedOrder.status.arabicLabel, equals('تم التسعير والرد من المورد'));
+    });
   });
 }

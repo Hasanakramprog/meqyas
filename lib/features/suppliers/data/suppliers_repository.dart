@@ -1,7 +1,10 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/firebase/firebase_config.dart';
 import '../domain/supplier.dart';
 
 class SuppliersRepository {
@@ -43,7 +46,8 @@ class SuppliersRepository {
     });
   }
 
-  /// Creates a supplier with a Firebase Auth account via `createSupplierUser` Cloud Function (Admin only).
+  /// Creates a supplier with a Firebase Auth account via `createSupplierUser` Cloud Function
+  /// (or secondary FirebaseApp fallback on the Spark Plan).
   Future<String> createSupplierAccount({
     required String email,
     required String password,
@@ -52,16 +56,65 @@ class SuppliersRepository {
     required List<String> whatsappPhones,
     required String address,
   }) async {
-    final callable = _functions.httpsCallable('createSupplierUser');
-    final res = await callable.call({
-      'email': email.trim(),
-      'password': password,
-      'name': name.trim(),
-      'phone': phone.trim(),
-      'whatsappPhones': whatsappPhones,
-      'address': address.trim(),
-    });
-    return res.data['supplierId'] as String;
+    try {
+      final callable = _functions.httpsCallable('createSupplierUser');
+      final res = await callable.call({
+        'email': email.trim(),
+        'password': password,
+        'name': name.trim(),
+        'phone': phone.trim(),
+        'whatsappPhones': whatsappPhones,
+        'address': address.trim(),
+      });
+      return res.data['supplierId'] as String;
+    } catch (_) {
+      // Spark Plan fallback: create supplier Auth user via secondary FirebaseApp
+      // so the currently logged-in Admin session is not interrupted.
+      FirebaseApp? secondaryApp;
+      try {
+        secondaryApp = await Firebase.initializeApp(
+          name: 'SecondarySupplierProvisionApp_${DateTime.now().millisecondsSinceEpoch}',
+          options: FirebaseConfig.currentPlatformOptions,
+        );
+        final secondaryAuth = FirebaseAuth.instanceFor(app: secondaryApp);
+        final cred = await secondaryAuth.createUserWithEmailAndPassword(
+          email: email.trim(),
+          password: password,
+        );
+        final uid = cred.user!.uid;
+        await cred.user!.updateDisplayName(name.trim());
+
+        final supplierRef = _col.doc();
+        final now = FieldValue.serverTimestamp();
+        final batch = _firestore.batch();
+        batch.set(supplierRef, {
+          'id': supplierRef.id,
+          'name': name.trim(),
+          'phone': phone.trim(),
+          'whatsappPhones': whatsappPhones,
+          'address': address.trim(),
+          'createdAt': now,
+          'updatedAt': now,
+        });
+        batch.set(_firestore.collection('users').doc(uid), {
+          'uid': uid,
+          'email': email.trim(),
+          'fullName': name.trim(),
+          'phone': phone.trim(),
+          'isEmailVerified': true,
+          'role': 'supplier',
+          'status': 'active',
+          'supplierId': supplierRef.id,
+          'createdAt': now,
+          'updatedAt': now,
+        });
+        await batch.commit();
+        await secondaryAuth.signOut();
+        return supplierRef.id;
+      } finally {
+        await secondaryApp?.delete();
+      }
+    }
   }
 
   /// Saves or updates a supplier document directly (Admin or own Supplier).

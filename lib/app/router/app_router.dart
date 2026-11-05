@@ -57,9 +57,9 @@ class RouterNotifier extends ChangeNotifier {
     final isVerifyRoute = loc == '/auth/verify-email';
     final isPendingRoute = loc == '/auth/pending-approval';
 
-    // 1. Not signed in
+    // 1. Not signed in -> always start on /auth/login (or allow /auth/register)
     if (user == null) {
-      if (isAuthRoute || isHomeRoute) return null;
+      if (isAuthRoute) return null;
       return '/auth/login';
     }
 
@@ -80,8 +80,8 @@ class RouterNotifier extends ChangeNotifier {
       return '/auth/pending-approval';
     }
 
-    // 5. Signed in & active trying to access login/register/verify/pending
-    if (isAuthRoute || isVerifyRoute || isPendingRoute) {
+    // 5. Signed in & active trying to access root (/), login, register, verify, or pending
+    if (isHomeRoute || isAuthRoute || isVerifyRoute || isPendingRoute) {
       return _dashboardForRole(user.role);
     }
 
@@ -122,7 +122,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
   final notifier = ref.watch(routerNotifierProvider);
 
   return GoRouter(
-    initialLocation: '/',
+    initialLocation: '/auth/login',
     refreshListenable: notifier,
     redirect: notifier.redirect,
     routes: [

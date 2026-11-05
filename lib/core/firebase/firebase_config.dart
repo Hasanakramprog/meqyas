@@ -4,37 +4,18 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
+import 'package:meqyas/firebase_options.dart';
 
 class FirebaseConfig {
-  static FirebaseOptions get currentPlatformOptions {
-    if (kIsWeb) {
-      return const FirebaseOptions(
-        apiKey: 'AIzaSyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p67',
-        appId: '1:100000000000:web:a1b2c3d4e5f60718',
-        messagingSenderId: '100000000000',
-        projectId: 'demo-meqyas',
-        storageBucket: 'demo-meqyas.appspot.com',
-      );
-    }
-    if (defaultTargetPlatform == TargetPlatform.iOS ||
-        defaultTargetPlatform == TargetPlatform.macOS) {
-      return const FirebaseOptions(
-        apiKey: 'AIzaSyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p67',
-        appId: '1:100000000000:ios:a1b2c3d4e5f60718',
-        messagingSenderId: '100000000000',
-        projectId: 'demo-meqyas',
-        storageBucket: 'demo-meqyas.appspot.com',
-        iosBundleId: 'com.meqyas.meqyas',
-      );
-    }
-    return const FirebaseOptions(
-      apiKey: 'AIzaSyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p67',
-      appId: '1:100000000000:android:a1b2c3d4e5f60718',
-      messagingSenderId: '100000000000',
-      projectId: 'demo-meqyas',
-      storageBucket: 'demo-meqyas.appspot.com',
-    );
-  }
+  /// Set via `--dart-define=USE_FIREBASE_EMULATOR=true` only if you explicitly
+  /// want to use the local emulator. Defaults to `false` (real Cloud Firebase).
+  static const bool useEmulator = bool.fromEnvironment(
+    'USE_FIREBASE_EMULATOR',
+    defaultValue: false,
+  );
+
+  static FirebaseOptions get currentPlatformOptions =>
+      DefaultFirebaseOptions.currentPlatform;
 
   static Future<void> initialize() async {
     try {
@@ -44,8 +25,12 @@ class FirebaseConfig {
         );
       }
 
-      if (kDebugMode) {
+      if (useEmulator) {
         await connectToEmulators();
+      }
+
+      if (kIsWeb) {
+        await FirebaseAuth.instance.setPersistence(Persistence.LOCAL);
       }
     } catch (e, stack) {
       debugPrint('Firebase initialization notice: $e\n$stack');
