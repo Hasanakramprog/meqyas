@@ -32,6 +32,7 @@ import '../../features/supplier_portal/presentation/supplier_stock_screen.dart';
 import '../../features/suppliers/presentation/admin_suppliers_screen.dart';
 import '../../features/suppliers/presentation/suppliers_directory_screen.dart';
 import '../../features/requirements/presentation/project_requirements_screen.dart';
+import '../../features/admin/presentation/admin_users_screen.dart';
 
 class RouterNotifier extends ChangeNotifier {
   final Ref _ref;
@@ -321,6 +322,11 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         name: 'admin_dashboard',
         builder: (context, state) => const AdminDashboardScreen(),
         routes: [
+          GoRoute(
+            path: 'users',
+            name: 'admin_users',
+            builder: (context, state) => const AdminUsersScreen(),
+          ),
           GoRoute(
             path: 'rules',
             name: 'admin_rules',

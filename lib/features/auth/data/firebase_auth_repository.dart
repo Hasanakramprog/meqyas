@@ -77,6 +77,47 @@ class FirebaseAuthRepository implements AuthRepository {
                 ),
               );
             } else {
+              // Self-heal if a user registered when the batch failed or before users/{uid} was written
+              final resolvedRole = UserRole.fromCode(roleStr);
+              var resolvedWorkshopId = workshopId;
+              if (resolvedRole == UserRole.owner &&
+                  (resolvedWorkshopId == null || resolvedWorkshopId.isEmpty)) {
+                final wRef = _firestore.collection('workshops').doc();
+                resolvedWorkshopId = wRef.id;
+                try {
+                  await wRef.set({
+                    'id': wRef.id,
+                    'name': firebaseUser.displayName?.isNotEmpty == true
+                        ? 'ورشة ${firebaseUser.displayName}'
+                        : 'ورشة جديدة',
+                    'ownerUid': firebaseUser.uid,
+                    'phone': '',
+                    'location': '',
+                    'status': 'active',
+                    'createdAt': FieldValue.serverTimestamp(),
+                    'updatedAt': FieldValue.serverTimestamp(),
+                  });
+                } catch (e) {
+                  debugPrint('Self-heal workshop creation notice: $e');
+                }
+              }
+              try {
+                await _firestore.collection('users').doc(firebaseUser.uid).set({
+                  'uid': firebaseUser.uid,
+                  'email': firebaseUser.email ?? '',
+                  'fullName': firebaseUser.displayName ?? '',
+                  'phone': '',
+                  'isEmailVerified': firebaseUser.emailVerified,
+                  'role': resolvedRole.code,
+                  'status': 'active',
+                  'workshopId': resolvedWorkshopId,
+                  'supplierId': supplierId,
+                  'createdAt': FieldValue.serverTimestamp(),
+                  'updatedAt': FieldValue.serverTimestamp(),
+                }, SetOptions(merge: true));
+              } catch (e) {
+                debugPrint('Self-heal user doc creation notice: $e');
+              }
               _emitAuthState(
                 AppUser(
                   uid: firebaseUser.uid,
@@ -84,8 +125,8 @@ class FirebaseAuthRepository implements AuthRepository {
                   fullName: firebaseUser.displayName ?? '',
                   phone: '',
                   isEmailVerified: firebaseUser.emailVerified,
-                  role: UserRole.fromCode(roleStr),
-                  workshopId: workshopId,
+                  role: resolvedRole,
+                  workshopId: resolvedWorkshopId,
                   supplierId: supplierId,
                 ),
               );
@@ -188,18 +229,8 @@ class FirebaseAuthRepository implements AuthRepository {
     } catch (e) {
       debugPrint('bootstrapOwner Cloud Function unavailable, using direct Firestore bootstrap: $e');
       final workshopRef = _firestore.collection('workshops').doc();
-      final batch = _firestore.batch();
-      batch.set(workshopRef, {
-        'id': workshopRef.id,
-        'name': data.workshopName.trim(),
-        'ownerUid': user.uid,
-        'phone': data.phone.trim(),
-        'location': data.workshopLocation.trim(),
-        'status': 'active',
-        'createdAt': FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
-      batch.set(_firestore.collection('users').doc(user.uid), {
+      // 1) Write users/{uid} FIRST so security rules know the user's role & workshopId
+      await _firestore.collection('users').doc(user.uid).set({
         'uid': user.uid,
         'email': data.email.trim(),
         'fullName': data.fullName.trim(),
@@ -212,7 +243,17 @@ class FirebaseAuthRepository implements AuthRepository {
         'createdAt': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
       });
-      await batch.commit();
+      // 2) Write workshops/{workshopId}
+      await workshopRef.set({
+        'id': workshopRef.id,
+        'name': data.workshopName.trim(),
+        'ownerUid': user.uid,
+        'phone': data.phone.trim(),
+        'location': data.workshopLocation.trim(),
+        'status': 'active',
+        'createdAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
     }
 
     // 4. Force token refresh to capture any custom claims

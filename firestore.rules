@@ -11,6 +11,10 @@ service cloud.firestore {
       return request.auth.token;
     }
     
+    function userDocExists() {
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
     function userDoc() {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
@@ -18,19 +22,19 @@ service cloud.firestore {
     function role() {
       return ('role' in userToken() && userToken().role != null)
         ? userToken().role
-        : userDoc().role;
+        : (userDocExists() ? userDoc().role : null);
     }
     
     function userWorkshopId() {
       return ('workshopId' in userToken() && userToken().workshopId != null)
         ? userToken().workshopId
-        : userDoc().workshopId;
+        : (userDocExists() ? userDoc().workshopId : null);
     }
 
     function userSupplierId() {
       return ('supplierId' in userToken() && userToken().supplierId != null)
         ? userToken().supplierId
-        : userDoc().supplierId;
+        : (userDocExists() ? userDoc().supplierId : null);
     }
     
     function isActive() {
@@ -79,12 +83,13 @@ service cloud.firestore {
     // Workshops and their subcollections
     match /workshops/{workshopId} {
       allow read: if isSignedIn();
-      allow write: if (
-        isActive() && role() == 'owner' && (
-          userWorkshopId() == workshopId ||
-          resource == null ||
+      allow create: if isSignedIn() && (
+        request.resource.data.ownerUid == request.auth.uid || isAdmin()
+      );
+      allow update, delete: if (
+        isActive() && (
           resource.data.ownerUid == request.auth.uid ||
-          request.resource.data.ownerUid == request.auth.uid
+          userWorkshopId() == workshopId
         )
       ) || isAdmin();
 

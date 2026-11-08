@@ -92,6 +92,13 @@ class AdminDashboardScreen extends StatelessWidget {
   Widget _buildAdminGrid(BuildContext context, bool isDark) {
     final items = [
       {
+        'title': 'إدارة وتفعيل المستخدمين',
+        'desc': 'تفعيل حسابات الورش والموردين الجدد بضغطة واحدة وإدارة الصلاحيات',
+        'icon': Icons.verified_user_outlined,
+        'color': AppColors.success,
+        'route': '/dashboard/admin/users',
+      },
+      {
         'title': 'قواعد الحسابات الهندسية',
         'desc': 'تحرير واعتماد معادلات القطاعات والزجاج',
         'icon': Icons.rule_folder_outlined,

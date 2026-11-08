@@ -202,6 +202,8 @@ class _ProjectRequirementsScreenState
     final savedCutPlanAsync = ref.watch(savedCutPlanProvider(query));
     final requirementsAsync = ref.watch(projectRequirementsProvider(query));
     final catalogItems = ref.watch(activeCatalogItemsProvider).value ?? [];
+    // Pre-watch suppliers stream so it is ready when opening the order/WhatsApp dialogs
+    ref.watch(suppliersListProvider);
 
     final project = projectAsync.value;
     final units = unitsAsync.value ?? const [];
@@ -2126,11 +2128,24 @@ class _ProjectRequirementsScreenState
     required Project? project,
     required List<RequirementLine> toBuyLines,
   }) async {
-    final suppliers = ref.read(suppliersListProvider).value ?? [];
+    var suppliers = ref.read(suppliersListProvider).value ?? [];
+    if (suppliers.isEmpty) {
+      try {
+        suppliers = await ref
+            .read(suppliersRepositoryProvider)
+            .watchSuppliers()
+            .first;
+      } catch (_) {
+        suppliers = SeedSuppliers.getDefaultSuppliers();
+      }
+    }
+    if (!context.mounted) return;
+
     Supplier? selectedSupplier =
         suppliers.isNotEmpty ? suppliers.first : null;
     final notesCtrl = TextEditingController();
     var isSending = false;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     await showDialog<void>(
       context: context,
@@ -2139,17 +2154,23 @@ class _ProjectRequirementsScreenState
           return Directionality(
             textDirection: TextDirection.rtl,
             child: AlertDialog(
-              title: const Row(
+              backgroundColor:
+                  isDark ? AppColors.darkCard : AppColors.lightSurface,
+              title: Row(
                 children: [
-                  Icon(
+                  const Icon(
                     Icons.send_to_mobile_rounded,
                     color: AppColors.amberPrimary,
                   ),
-                  SizedBox(width: 8),
+                  const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       'إرسال طلب تسعير وتوريد للمورد بالتطبيق',
-                      style: TextStyle(fontSize: 16),
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: isDark ? Colors.white : AppColors.slate900,
+                      ),
                     ),
                   ),
                 ],
@@ -2164,13 +2185,17 @@ class _ProjectRequirementsScreenState
                       Container(
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
-                          color: AppColors.glassBlue.withValues(alpha: 0.1),
+                          color: AppColors.glassBlue.withValues(alpha: 0.12),
                           borderRadius: BorderRadius.circular(10),
                         ),
                         child: Text(
                           'سيتم إرسال (${toBuyLines.length} صنف مطلوب للشراء) إلى المورد المختار داخل التطبيق.\n'
                           'سيقوم المورد بمراجعة الأصناف وتحديد المتوفر لديه وإدخال الأسعار والملاحظات وإرسالها لك.',
-                          style: const TextStyle(fontSize: 12, height: 1.4),
+                          style: TextStyle(
+                            fontSize: 12,
+                            height: 1.4,
+                            color: isDark ? Colors.white : AppColors.slate800,
+                          ),
                         ),
                       ),
                       const SizedBox(height: 16),
@@ -2185,6 +2210,15 @@ class _ProjectRequirementsScreenState
                       else
                         DropdownButtonFormField<Supplier>(
                           initialValue: selectedSupplier,
+                          isExpanded: true,
+                          dropdownColor: isDark
+                              ? AppColors.darkSurface
+                              : AppColors.lightSurface,
+                          style: TextStyle(
+                            color: isDark ? Colors.white : AppColors.slate900,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
                           decoration: const InputDecoration(
                             labelText: 'اختر المورد *',
                             border: OutlineInputBorder(),
@@ -2195,6 +2229,12 @@ class _ProjectRequirementsScreenState
                               value: s,
                               child: Text(
                                 '${s.name}${s.phone.isNotEmpty ? " (${s.phone})" : ""}',
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: isDark
+                                      ? Colors.white
+                                      : AppColors.slate900,
+                                ),
                               ),
                             );
                           }).toList(),
@@ -2206,6 +2246,9 @@ class _ProjectRequirementsScreenState
                       TextField(
                         controller: notesCtrl,
                         maxLines: 3,
+                        style: TextStyle(
+                          color: isDark ? Colors.white : AppColors.slate900,
+                        ),
                         decoration: const InputDecoration(
                           labelText: 'ملاحظات الورشة للمورد (اختياري)',
                           hintText:
@@ -2331,7 +2374,19 @@ class _ProjectRequirementsScreenState
     required Project? project,
     required List<RequirementLine> toBuyLines,
   }) async {
-    final suppliers = ref.read(suppliersListProvider).value ?? [];
+    var suppliers = ref.read(suppliersListProvider).value ?? [];
+    if (suppliers.isEmpty) {
+      try {
+        suppliers = await ref
+            .read(suppliersRepositoryProvider)
+            .watchSuppliers()
+            .first;
+      } catch (_) {
+        suppliers = SeedSuppliers.getDefaultSuppliers();
+      }
+    }
+    if (!context.mounted) return;
+
     Supplier? selectedSupplier =
         suppliers.isNotEmpty ? suppliers.first : null;
     final phoneCtrl = TextEditingController(
