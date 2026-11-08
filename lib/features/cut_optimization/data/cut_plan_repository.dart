@@ -463,6 +463,59 @@ class CutPlanRepository {
     });
   }
 
+  /// Manually adds 1 or more remnants / purchased pieces to the workshop's
+  /// remnants shelf (`workshops/{workshopId}/remnants`).
+  ///
+  /// These items have `state: 'available'` and matching `itemCode`, so the
+  /// [CutOptimizer] automatically reuses them in future cut plans just like
+  /// remnants left over from previous cuts.
+  Future<void> addManualRemnants({
+    required String workshopId,
+    required String itemCode,
+    required String nameArabic,
+    required double lengthCm,
+    String color = 'أبيض',
+    int quantity = 1,
+    String sourceNote = 'إضافة يدوية / مخزون الورشة',
+  }) async {
+    final count = quantity < 1 ? 1 : quantity;
+    final batch = _firestore.batch();
+    final now = FieldValue.serverTimestamp();
+    final col = _firestore
+        .collection('workshops')
+        .doc(workshopId)
+        .collection('remnants');
+
+    for (var i = 0; i < count; i++) {
+      final docRef = col.doc();
+      batch.set(docRef, {
+        'itemCode': itemCode.trim(),
+        'nameArabic': nameArabic.trim(),
+        'color': color.trim().isEmpty ? 'أبيض' : color.trim(),
+        'lengthCm': (lengthCm * 10).round() / 10,
+        'sourceProjectId': 'manual',
+        'sourceProjectName': sourceNote.trim().isEmpty
+            ? 'إضافة يدوية / مخزون الورشة'
+            : sourceNote.trim(),
+        'sourcePlanId': 'manual',
+        'state': 'available',
+        'createdAt': now,
+      });
+    }
+
+    await batch.commit();
+  }
+
+  /// Deletes a remnant document from the workshop's shelf.
+  Future<void> deleteRemnant(String workshopId, String remnantId) async {
+    await _firestore
+        .collection('workshops')
+        .doc(workshopId)
+        .collection('remnants')
+        .doc(remnantId)
+        .delete();
+  }
+
   // -------------------------------------------------------------------------
   // Saved Cut Plan — Stream
   // -------------------------------------------------------------------------

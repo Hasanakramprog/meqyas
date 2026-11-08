@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:maqyas_engine/maqyas_engine.dart';
 import 'package:meqyas/app/theme/app_colors.dart';
 import 'package:meqyas/features/auth/presentation/controllers/auth_controller.dart';
 import '../data/rules_repository.dart';
+import '../domain/locked_formula.dart';
 
 class WorkshopRulesScreen extends ConsumerStatefulWidget {
   final String? initialWorkshopId;
@@ -888,17 +890,47 @@ class _WorkshopRulesScreenState extends ConsumerState<WorkshopRulesScreen>
     );
   }
 
+  /// Owner edit dialog: the formula structure (variables, operators, brackets)
+  /// is locked; only numeric constants are editable, each within ±50% of the
+  /// admin-approved value. The admin rule editor keeps free-text editing.
   Future<void> _openEditRuleDialog(
     BuildContext context,
     CalculationRule rule,
     String workshopId,
   ) async {
-    final lengthCtrl = TextEditingController(text: rule.lengthFormula);
-    final quantityCtrl = TextEditingController(text: rule.quantityFormula);
-    String? validationError;
-
     final repo = ref.read(rulesRepositoryProvider);
     final currentUser = ref.read(currentUserProvider).value;
+
+    // `rule` is the effective rule (may already contain this workshop's
+    // override). Bounds and structure always come from the admin-approved rule.
+    CalculationRule baseRule = rule;
+    try {
+      final approved = await repo.watchApprovedRules().first;
+      for (final r in approved) {
+        if (r.ruleKey == rule.ruleKey) {
+          baseRule = r;
+          break;
+        }
+      }
+    } catch (_) {
+      // Offline or permission issue: fall back to the effective rule.
+    }
+    if (!context.mounted) return;
+
+    final lengthEditor = _LockedFormulaEditorState.create(
+      baseFormula: baseRule.lengthFormula,
+      currentFormula: rule.lengthFormula,
+      integerOnlyForWholeNumbers: false,
+    );
+    final quantityEditor = _LockedFormulaEditorState.create(
+      baseFormula: baseRule.quantityFormula,
+      currentFormula: rule.quantityFormula,
+      integerOnlyForWholeNumbers: true,
+    );
+    final structureWasReset =
+        lengthEditor.structureWasReset || quantityEditor.structureWasReset;
+
+    String? engineError;
 
     await showDialog(
       context: context,
@@ -907,14 +939,20 @@ class _WorkshopRulesScreenState extends ConsumerState<WorkshopRulesScreen>
           builder: (context, setDialogState) {
             void validate() {
               final dummy = rule.copyWith(
-                lengthFormula: lengthCtrl.text.trim(),
-                quantityFormula: quantityCtrl.text.trim(),
+                lengthFormula: lengthEditor.rebuilt,
+                quantityFormula: quantityEditor.rebuilt,
               );
               final res = RuleValidator.validate(dummy);
               setDialogState(() {
-                validationError = res.isValid ? null : res.errorMessages.join('\n');
+                engineError = res.isValid ? null : res.errorMessages.join('\n');
               });
             }
+
+            final hasFieldErrors =
+                lengthEditor.hasErrors || quantityEditor.hasErrors;
+            final validationError = hasFieldErrors
+                ? 'بعض القيم خارج النطاق المسموح (±50% من القيمة المعتمدة)'
+                : engineError;
 
             return AlertDialog(
               title: Row(
@@ -940,25 +978,32 @@ class _WorkshopRulesScreenState extends ConsumerState<WorkshopRulesScreen>
                         'هذا التعديل سيطبق فقط على هذه الورشة المحددة دون أي تأثير على باقي الورش.',
                         style: TextStyle(fontSize: 12, color: AppColors.slate400),
                       ),
-                      const SizedBox(height: 14),
-                      TextField(
-                        controller: lengthCtrl,
-                        decoration: const InputDecoration(
-                          labelText: 'معادلة الطول (سم)',
-                          hintText: 'مثال: (W / 2) + 0.9',
-                          border: OutlineInputBorder(),
-                        ),
-                        onChanged: (_) => validate(),
+                      const SizedBox(height: 6),
+                      const Text(
+                        'يمكنك تعديل الأرقام فقط ضمن ±50% من القيمة المعتمدة. شكل المعادلة ثابت.',
+                        style: TextStyle(fontSize: 12, color: AppColors.amberLight),
                       ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: quantityCtrl,
-                        decoration: const InputDecoration(
-                          labelText: 'معادلة عدد القطع',
-                          hintText: 'مثال: sashCount * 2',
-                          border: OutlineInputBorder(),
+                      if (structureWasReset) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          'تم تحديث المعادلة المعتمدة من الإدارة، لذا عُرضت القيم الافتراضية الجديدة.',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: AppColors.warning.withValues(alpha: 0.9),
+                          ),
                         ),
-                        onChanged: (_) => validate(),
+                      ],
+                      const SizedBox(height: 14),
+                      _LockedFormulaEditor(
+                        label: 'معادلة الطول (سم)',
+                        editor: lengthEditor,
+                        onChanged: () => validate(),
+                      ),
+                      const SizedBox(height: 14),
+                      _LockedFormulaEditor(
+                        label: 'معادلة عدد القطع',
+                        editor: quantityEditor,
+                        onChanged: () => validate(),
                       ),
                       const SizedBox(height: 12),
                       if (validationError != null)
@@ -976,7 +1021,7 @@ class _WorkshopRulesScreenState extends ConsumerState<WorkshopRulesScreen>
                               const SizedBox(width: 6),
                               Expanded(
                                 child: Text(
-                                  validationError!,
+                                  validationError,
                                   style: const TextStyle(color: AppColors.error, fontSize: 11),
                                 ),
                               ),
@@ -1011,19 +1056,38 @@ class _WorkshopRulesScreenState extends ConsumerState<WorkshopRulesScreen>
                   onPressed: validationError != null
                       ? null
                       : () async {
-                          await repo.saveWorkshopRuleOverride(
-                            workshopId: workshopId,
-                            ruleKey: rule.ruleKey,
-                            lengthFormula: lengthCtrl.text.trim(),
-                            quantityFormula: quantityCtrl.text.trim(),
-                            baseRuleVersionId: rule.id,
-                            updatedBy: currentUser?.uid,
-                          );
+                          final newLength = lengthEditor.rebuilt;
+                          final newQuantity = quantityEditor.rebuilt;
+                          final matchesApproved =
+                              lengthEditor.equalsBase && quantityEditor.equalsBase;
+
+                          if (matchesApproved) {
+                            // Same values as the admin rule: drop the override.
+                            await repo.deleteWorkshopRuleOverride(
+                              workshopId: workshopId,
+                              ruleKey: rule.ruleKey,
+                            );
+                          } else {
+                            await repo.saveWorkshopRuleOverride(
+                              workshopId: workshopId,
+                              ruleKey: rule.ruleKey,
+                              lengthFormula: newLength,
+                              quantityFormula: newQuantity,
+                              baseRuleVersionId: baseRule.id,
+                              updatedBy: currentUser?.uid,
+                            );
+                          }
 
                           if (context.mounted) {
                             Navigator.of(ctx).pop();
                             ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('تم حفظ معادلة الورشة بنجاح')),
+                              SnackBar(
+                                content: Text(
+                                  matchesApproved
+                                      ? 'القيم مطابقة للمعتمد، تم استخدام القاعدة الافتراضية'
+                                      : 'تم حفظ معادلة الورشة بنجاح',
+                                ),
+                              ),
                             );
                           }
                         },
@@ -1035,6 +1099,8 @@ class _WorkshopRulesScreenState extends ConsumerState<WorkshopRulesScreen>
         );
       },
     );
+    // Controllers are not disposed here on purpose: the dialog's exit
+    // animation may still read them after showDialog returns.
   }
 
   Future<void> _confirmRestoreRule(
@@ -1513,4 +1579,270 @@ class _EngineeringPreviewRowData {
     this.rule,
     this.isOverridden = false,
   });
+}
+
+// =============================================================================
+// Locked formula editor (owner): numbers editable, structure fixed
+// =============================================================================
+
+/// Holds the parsed formula, one controller per numeric constant, and the
+/// ±50% bounds derived from the admin-approved formula.
+class _LockedFormulaEditorState {
+  final LockedFormula base;
+  final List<TextEditingController> controllers;
+  final List<NumberBounds> bounds;
+
+  /// True when the saved override no longer matches the admin structure
+  /// (admin changed the formula), so base values were loaded instead.
+  final bool structureWasReset;
+
+  _LockedFormulaEditorState._(
+    this.base,
+    this.controllers,
+    this.bounds,
+    this.structureWasReset,
+  );
+
+  factory _LockedFormulaEditorState.create({
+    required String baseFormula,
+    required String currentFormula,
+    required bool integerOnlyForWholeNumbers,
+  }) {
+    final base = LockedFormula.parse(baseFormula);
+    final current = LockedFormula.parse(currentFormula);
+    final canUseCurrent = current.hasSameStructureAs(base);
+    final startValues = canUseCurrent ? current.numbers : base.numbers;
+
+    final bounds = base.numbers.map((orig) {
+      final isWhole = orig == orig.roundToDouble();
+      return NumberBounds.around(
+        orig,
+        integerOnly: integerOnlyForWholeNumbers && isWhole,
+      );
+    }).toList();
+
+    final controllers = startValues
+        .map((v) => TextEditingController(text: LockedFormula.formatNumber(v)))
+        .toList();
+
+    return _LockedFormulaEditorState._(
+      base,
+      controllers,
+      bounds,
+      !canUseCurrent && currentFormula.trim() != baseFormula.trim(),
+    );
+  }
+
+  String? errorAt(int i) => bounds[i].validate(controllers[i].text);
+
+  bool get hasErrors {
+    for (var i = 0; i < controllers.length; i++) {
+      if (errorAt(i) != null) return true;
+    }
+    return false;
+  }
+
+  /// Rebuilt formula; numbers are normalized (e.g. "14.0" -> "14").
+  String get rebuilt {
+    final values = <String>[];
+    for (var i = 0; i < controllers.length; i++) {
+      final parsed = double.tryParse(controllers[i].text.trim());
+      values.add(parsed == null
+          ? controllers[i].text.trim()
+          : LockedFormula.formatNumber(parsed));
+    }
+    return base.rebuild(values);
+  }
+
+  bool get equalsBase {
+    for (var i = 0; i < controllers.length; i++) {
+      final v = double.tryParse(controllers[i].text.trim());
+      if (v == null || v != bounds[i].original) return false;
+    }
+    return true;
+  }
+}
+
+class _LockedFormulaEditor extends StatefulWidget {
+  final String label;
+  final _LockedFormulaEditorState editor;
+  final VoidCallback onChanged;
+
+  const _LockedFormulaEditor({
+    required this.label,
+    required this.editor,
+    required this.onChanged,
+  });
+
+  @override
+  State<_LockedFormulaEditor> createState() => _LockedFormulaEditorWidgetState();
+}
+
+class _LockedFormulaEditorWidgetState extends State<_LockedFormulaEditor> {
+  static const _monoStyle = TextStyle(
+    fontFamily: 'monospace',
+    fontSize: 15,
+    fontWeight: FontWeight.w700,
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final editor = widget.editor;
+    final segments = editor.base.segments;
+
+    final chips = <Widget>[];
+    var numberIndex = 0;
+    for (final s in segments) {
+      if (s.isNumber) {
+        chips.add(_buildNumberField(numberIndex, isDark));
+        numberIndex++;
+      } else {
+        final text = s.text.trim();
+        if (text.isEmpty) continue;
+        chips.add(
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+            decoration: BoxDecoration(
+              color: isDark ? AppColors.darkSurface : AppColors.lightCard,
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Text(text, style: _monoStyle.copyWith(color: AppColors.slate400)),
+          ),
+        );
+      }
+    }
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: isDark ? AppColors.darkBorder : AppColors.lightBorder),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.lock_outline_rounded, size: 14, color: AppColors.slate400),
+              const SizedBox(width: 6),
+              Text(widget.label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+            ],
+          ),
+          const SizedBox(height: 10),
+          if (editor.controllers.isEmpty)
+            Directionality(
+              textDirection: TextDirection.ltr,
+              child: Text(editor.base.source, style: _monoStyle),
+            )
+          else
+            // Formulas are math expressions: always lay them out left-to-right.
+            Directionality(
+              textDirection: TextDirection.ltr,
+              child: Wrap(
+                spacing: 6,
+                runSpacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.start,
+                children: chips,
+              ),
+            ),
+          if (editor.controllers.isEmpty) ...[
+            const SizedBox(height: 6),
+            const Text(
+              'لا توجد قيم رقمية قابلة للتعديل في هذه المعادلة',
+              style: TextStyle(fontSize: 11, color: AppColors.slate400),
+            ),
+          ] else ...[
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                const Text('المعادلة الناتجة: ', style: TextStyle(fontSize: 11, color: AppColors.slate400)),
+                Expanded(
+                  child: Directionality(
+                    textDirection: TextDirection.ltr,
+                    child: Text(
+                      editor.rebuilt,
+                      textAlign: TextAlign.left,
+                      style: _monoStyle.copyWith(fontSize: 13, color: AppColors.amberLight),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildNumberField(int i, bool isDark) {
+    final editor = widget.editor;
+    final bounds = editor.bounds[i];
+    final error = editor.errorAt(i);
+    final changed = double.tryParse(editor.controllers[i].text.trim()) != bounds.original;
+
+    return SizedBox(
+      width: 92,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            controller: editor.controllers[i],
+            enabled: !bounds.isLocked,
+            textAlign: TextAlign.center,
+            style: _monoStyle.copyWith(
+              color: error != null
+                  ? AppColors.error
+                  : (changed ? AppColors.amberLight : null),
+            ),
+            keyboardType: TextInputType.numberWithOptions(decimal: !bounds.integerOnly),
+            inputFormatters: [
+              FilteringTextInputFormatter.allow(
+                bounds.integerOnly ? RegExp(r'[0-9]') : RegExp(r'[0-9.]'),
+              ),
+            ],
+            decoration: InputDecoration(
+              isDense: true,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 10),
+              border: const OutlineInputBorder(),
+              focusedBorder: OutlineInputBorder(
+                borderSide: BorderSide(
+                  color: error != null ? AppColors.error : AppColors.amberPrimary,
+                  width: 1.6,
+                ),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderSide: BorderSide(
+                  color: error != null
+                      ? AppColors.error
+                      : (changed ? AppColors.amberPrimary : (isDark ? AppColors.darkBorder : AppColors.lightBorder)),
+                ),
+              ),
+            ),
+            onChanged: (_) {
+              setState(() {});
+              widget.onChanged();
+            },
+          ),
+          const SizedBox(height: 3),
+          Directionality(
+            textDirection: TextDirection.rtl,
+            child: Text(
+              error ??
+                  (bounds.isLocked
+                      ? 'ثابت'
+                      : 'الأصل ${LockedFormula.formatNumber(bounds.original)}'),
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              style: TextStyle(
+                fontSize: 10,
+                color: error != null ? AppColors.error : AppColors.slate400,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
