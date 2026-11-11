@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:maqyas_engine/maqyas_engine.dart';
+import '../../../core/firebase/offline_firestore_helper.dart';
 
 class RulesRepository {
   final FirebaseFirestore _firestore;
@@ -126,7 +127,7 @@ class RulesRepository {
       });
     }
 
-    await batch.commit();
+    await OfflineFirestoreHelper.commitBatchOfflineSafe(batch);
   }
 
   Future<void> deleteWorkshopRuleOverride({
@@ -147,7 +148,7 @@ class RulesRepository {
           .doc(ruleKey);
       batch.delete(ref);
     }
-    await batch.commit();
+    await OfflineFirestoreHelper.commitBatchOfflineSafe(batch);
   }
 
   // -------------------------------------------------------------
@@ -200,7 +201,9 @@ class RulesRepository {
 
   Future<CutOptimizer> getSystemCuttingOptimizer() async {
     try {
-      final doc = await _firestore.collection('systemConfigs').doc('cuttingOptimizer').get();
+      final doc = await OfflineFirestoreHelper.getDocOfflineSafe(
+        _firestore.collection('systemConfigs').doc('cuttingOptimizer'),
+      );
       if (doc.exists) {
         final d = doc.data()!;
         return CutOptimizer(
@@ -245,7 +248,7 @@ class RulesRepository {
         'updatedAt': now,
       });
     }
-    await batch.commit();
+    await OfflineFirestoreHelper.commitBatchOfflineSafe(batch);
   }
 
   Future<void> resetWorkshopCuttingSettings({
@@ -265,7 +268,7 @@ class RulesRepository {
           .doc('cutting');
       batch.delete(ref);
     }
-    await batch.commit();
+    await OfflineFirestoreHelper.commitBatchOfflineSafe(batch);
   }
 
   Future<void> saveSystemCuttingSettings({
@@ -276,14 +279,16 @@ class RulesRepository {
     required String adminUid,
   }) async {
     final ref = _firestore.collection('systemConfigs').doc('cuttingOptimizer');
-    await ref.set({
-      'barLengthCm': barLengthCm,
-      'trimLossCm': trimLossCm,
-      'kerfPerCutCm': kerfPerCutCm,
-      'minRemnantCm': minRemnantCm,
-      'updatedBy': adminUid,
-      'updatedAt': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
+    await OfflineFirestoreHelper.writeOfflineSafe(
+      ref.set({
+        'barLengthCm': barLengthCm,
+        'trimLossCm': trimLossCm,
+        'kerfPerCutCm': kerfPerCutCm,
+        'minRemnantCm': minRemnantCm,
+        'updatedBy': adminUid,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true)),
+    );
   }
 
   // -------------------------------------------------------------
@@ -297,7 +302,9 @@ class RulesRepository {
 
     for (final id in cleanIds) {
       try {
-        final doc = await _firestore.collection('calculationRules').doc(id).get();
+        final doc = await OfflineFirestoreHelper.getDocOfflineSafe(
+          _firestore.collection('calculationRules').doc(id),
+        );
         if (doc.exists) {
           rules.add(CalculationRule.fromMap(doc.data()!, docId: doc.id));
         }
@@ -324,39 +331,51 @@ class RulesRepository {
       if (adminUid != null) data['createdBy'] = adminUid;
     }
 
-    await docRef.set(data, SetOptions(merge: true));
+    await OfflineFirestoreHelper.writeOfflineSafe(
+      docRef.set(data, SetOptions(merge: true)),
+    );
     return docRef.id;
   }
 
   Future<void> deleteDraftRule(String ruleId) async {
-    await _firestore.collection('calculationRules').doc(ruleId).delete();
+    await OfflineFirestoreHelper.writeOfflineSafe(
+      _firestore.collection('calculationRules').doc(ruleId).delete(),
+    );
   }
 
   Future<void> approveRule(String ruleId) async {
-    try {
-      final callable = _functions.httpsCallable('approveRule');
-      await callable.call({'ruleId': ruleId});
-    } catch (_) {
-      // Spark Plan fallback: approve rule directly in Firestore
-      await _firestore.collection('calculationRules').doc(ruleId).update({
+    if (OfflineFirestoreHelper.isOnline) {
+      try {
+        final callable = _functions.httpsCallable('approveRule');
+        await callable.call({'ruleId': ruleId});
+        return;
+      } catch (_) {}
+    }
+    // Spark Plan / Offline fallback: approve rule directly in Firestore
+    await OfflineFirestoreHelper.writeOfflineSafe(
+      _firestore.collection('calculationRules').doc(ruleId).update({
         'status': 'approved',
         'approvedAt': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
-      });
-    }
+      }),
+    );
   }
 
   Future<void> archiveRule(String ruleId) async {
-    try {
-      final callable = _functions.httpsCallable('archiveRule');
-      await callable.call({'ruleId': ruleId});
-    } catch (_) {
-      // Spark Plan fallback: archive rule directly in Firestore
-      await _firestore.collection('calculationRules').doc(ruleId).update({
+    if (OfflineFirestoreHelper.isOnline) {
+      try {
+        final callable = _functions.httpsCallable('archiveRule');
+        await callable.call({'ruleId': ruleId});
+        return;
+      } catch (_) {}
+    }
+    // Spark Plan / Offline fallback: archive rule directly in Firestore
+    await OfflineFirestoreHelper.writeOfflineSafe(
+      _firestore.collection('calculationRules').doc(ruleId).update({
         'status': 'archived',
         'updatedAt': FieldValue.serverTimestamp(),
-      });
-    }
+      }),
+    );
   }
 
   Stream<List<Map<String, dynamic>>> watchAuditLogs() {
@@ -390,18 +409,21 @@ class RulesRepository {
     String phone = '',
     String? ownerUid,
   }) async {
-    try {
-      final callable = _functions.httpsCallable('createWorkshop');
-      final res = await callable.call({
-        'name': name,
-        'location': location,
-        'phone': phone,
-      });
-      return res.data['workshopId'] as String;
-    } catch (_) {
-      // Spark Plan fallback: create workshop directly in Firestore
-      final docRef = _firestore.collection('workshops').doc();
-      await docRef.set({
+    if (OfflineFirestoreHelper.isOnline) {
+      try {
+        final callable = _functions.httpsCallable('createWorkshop');
+        final res = await callable.call({
+          'name': name,
+          'location': location,
+          'phone': phone,
+        });
+        return res.data['workshopId'] as String;
+      } catch (_) {}
+    }
+    // Spark Plan / Offline fallback: create workshop directly in Firestore
+    final docRef = _firestore.collection('workshops').doc();
+    await OfflineFirestoreHelper.writeOfflineSafe(
+      docRef.set({
         'id': docRef.id,
         'name': name.trim(),
         'location': location.trim(),
@@ -410,9 +432,9 @@ class RulesRepository {
         'status': 'active',
         'createdAt': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
-      });
-      return docRef.id;
-    }
+      }),
+    );
+    return docRef.id;
   }
 }
 

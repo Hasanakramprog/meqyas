@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:maqyas_engine/maqyas_engine.dart';
+import '../../../core/firebase/offline_firestore_helper.dart';
 
 // ---------------------------------------------------------------------------
 // Models
@@ -242,12 +243,13 @@ class CutPlanRepository {
 
   /// Loads only available remnants for the optimizer (one-shot, called at plan generation time).
   Future<List<RemnantDoc>> getAvailableRemnants(String workshopId) async {
-    final snap = await _firestore
-        .collection('workshops')
-        .doc(workshopId)
-        .collection('remnants')
-        .where('state', isEqualTo: 'available')
-        .get();
+    final snap = await OfflineFirestoreHelper.getQueryOfflineSafe(
+      _firestore
+          .collection('workshops')
+          .doc(workshopId)
+          .collection('remnants')
+          .where('state', isEqualTo: 'available'),
+    );
     return snap.docs.map((d) => RemnantDoc.fromMap(d.data(), d.id)).toList();
   }
 
@@ -256,7 +258,7 @@ class CutPlanRepository {
   // -------------------------------------------------------------------------
 
   /// Saves the optimization result to Firestore:
-  /// 1. Writes a `cutPlans/{planId}` document.
+  /// 1. Writes a deterministic `cutPlans/plan_{projectId}` document.
   /// 2. Writes a `remnants/{id}` document for every new reusable remnant.
   /// 3. Marks consumed remnant IDs as `state: used`.
   Future<String> saveCutPlan({
@@ -269,28 +271,34 @@ class CutPlanRepository {
   }) async {
     final batch = _firestore.batch();
     final now = FieldValue.serverTimestamp();
+    final deterministicPlanId = 'plan_$projectId';
 
-    // 1. Delete previous cut plans for this project
-    final existingPlans = await _firestore
-        .collection('workshops')
-        .doc(workshopId)
-        .collection('cutPlans')
-        .where('projectId', isEqualTo: projectId)
-        .get();
+    // 1. Delete previous cut plans for this project (if any legacy random-ID plans exist)
+    final existingPlans = await OfflineFirestoreHelper.getQueryOfflineSafe(
+      _firestore
+          .collection('workshops')
+          .doc(workshopId)
+          .collection('cutPlans')
+          .where('projectId', isEqualTo: projectId),
+    );
 
-    final oldPlanIds = existingPlans.docs.map((d) => d.id).toSet();
+    final oldPlanIds = existingPlans.docs.map((d) => d.id).toSet()
+      ..add(deterministicPlanId);
     for (final doc in existingPlans.docs) {
-      batch.delete(doc.reference);
+      if (doc.id != deterministicPlanId) {
+        batch.delete(doc.reference);
+      }
     }
 
     // 2. Delete existing AVAILABLE remnants originating from this project
     // (they are superseded by the new cut plan calculation)
-    final existingRemnants = await _firestore
-        .collection('workshops')
-        .doc(workshopId)
-        .collection('remnants')
-        .where('sourceProjectId', isEqualTo: projectId)
-        .get();
+    final existingRemnants = await OfflineFirestoreHelper.getQueryOfflineSafe(
+      _firestore
+          .collection('workshops')
+          .doc(workshopId)
+          .collection('remnants')
+          .where('sourceProjectId', isEqualTo: projectId),
+    );
 
     for (final doc in existingRemnants.docs) {
       final state = doc.data()['state'];
@@ -302,12 +310,13 @@ class CutPlanRepository {
     // 3. If an old plan consumed shelf remnants that are NOT consumed by the new plan,
     // restore them back to 'available'
     if (oldPlanIds.isNotEmpty) {
-      final consumedByOldPlans = await _firestore
-          .collection('workshops')
-          .doc(workshopId)
-          .collection('remnants')
-          .where('usedInPlanId', whereIn: oldPlanIds.toList().take(10).toList())
-          .get();
+      final consumedByOldPlans = await OfflineFirestoreHelper.getQueryOfflineSafe(
+        _firestore
+            .collection('workshops')
+            .doc(workshopId)
+            .collection('remnants')
+            .where('usedInPlanId', whereIn: oldPlanIds.toList().take(10).toList()),
+      );
 
       final newlyConsumed = result.consumedRemnantIds.toSet();
       for (final rDoc in consumedByOldPlans.docs) {
@@ -321,12 +330,12 @@ class CutPlanRepository {
       }
     }
 
-    // 4. Create new cut plan document
+    // 4. Create/overwrite deterministic cut plan document (`plan_$projectId`)
     final planRef = _firestore
         .collection('workshops')
         .doc(workshopId)
         .collection('cutPlans')
-        .doc();
+        .doc(deterministicPlanId);
     final planId = planRef.id;
 
     // Build itemGroups from barPlans
@@ -430,7 +439,7 @@ class CutPlanRepository {
       });
     }
 
-    await batch.commit();
+    await OfflineFirestoreHelper.commitBatchOfflineSafe(batch);
     return planId;
   }
 
@@ -439,28 +448,32 @@ class CutPlanRepository {
   // -------------------------------------------------------------------------
 
   Future<void> markRemnantUsed(String workshopId, String remnantId) async {
-    await _firestore
-        .collection('workshops')
-        .doc(workshopId)
-        .collection('remnants')
-        .doc(remnantId)
-        .update({
-      'state': 'used',
-      'usedAt': FieldValue.serverTimestamp(),
-    });
+    await OfflineFirestoreHelper.writeOfflineSafe(
+      _firestore
+          .collection('workshops')
+          .doc(workshopId)
+          .collection('remnants')
+          .doc(remnantId)
+          .update({
+        'state': 'used',
+        'usedAt': FieldValue.serverTimestamp(),
+      }),
+    );
   }
 
   Future<void> markRemnantAvailable(String workshopId, String remnantId) async {
-    await _firestore
-        .collection('workshops')
-        .doc(workshopId)
-        .collection('remnants')
-        .doc(remnantId)
-        .update({
-      'state': 'available',
-      'usedAt': FieldValue.delete(),
-      'usedInPlanId': FieldValue.delete(),
-    });
+    await OfflineFirestoreHelper.writeOfflineSafe(
+      _firestore
+          .collection('workshops')
+          .doc(workshopId)
+          .collection('remnants')
+          .doc(remnantId)
+          .update({
+        'state': 'available',
+        'usedAt': FieldValue.delete(),
+        'usedInPlanId': FieldValue.delete(),
+      }),
+    );
   }
 
   /// Manually adds 1 or more remnants / purchased pieces to the workshop's
@@ -503,17 +516,19 @@ class CutPlanRepository {
       });
     }
 
-    await batch.commit();
+    await OfflineFirestoreHelper.commitBatchOfflineSafe(batch);
   }
 
   /// Deletes a remnant document from the workshop's shelf.
   Future<void> deleteRemnant(String workshopId, String remnantId) async {
-    await _firestore
-        .collection('workshops')
-        .doc(workshopId)
-        .collection('remnants')
-        .doc(remnantId)
-        .delete();
+    await OfflineFirestoreHelper.writeOfflineSafe(
+      _firestore
+          .collection('workshops')
+          .doc(workshopId)
+          .collection('remnants')
+          .doc(remnantId)
+          .delete(),
+    );
   }
 
   // -------------------------------------------------------------------------

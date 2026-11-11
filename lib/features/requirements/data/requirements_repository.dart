@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../core/firebase/offline_firestore_helper.dart';
 import '../domain/requirement_line.dart';
 import 'requirements_service.dart';
 
@@ -45,11 +46,20 @@ class RequirementsRepository {
     String projectId,
   ) async {
     if (workshopId.isEmpty || projectId.isEmpty) return const [];
-    final snap = await _reqCol(workshopId, projectId).get();
+    final snap = await OfflineFirestoreHelper.getQueryOfflineSafe(
+      _reqCol(workshopId, projectId),
+    );
     final list = snap.docs
         .map((doc) => RequirementLine.fromMap(doc.data(), docId: doc.id))
         .toList();
     return RequirementsService.sortLines(list);
+  }
+
+  String _deterministicAutoId(RequirementLine line) {
+    final safeCode = line.engineItemCode
+        .trim()
+        .replaceAll(RegExp(r'[^a-zA-Z0-9_\u0600-\u06FF]'), '_');
+    return 'auto_${line.category}_${safeCode.isEmpty ? line.nameArabic.hashCode.abs() : safeCode}';
   }
 
   /// Writes the initial auto-generated snapshot if no lines exist yet,
@@ -63,8 +73,16 @@ class RequirementsRepository {
     if (workshopId.isEmpty || projectId.isEmpty) return;
 
     final col = _reqCol(workshopId, projectId);
-    final existingSnap = await col.get();
-    final incomingIds = lines.map((l) => l.id).where((id) => id.isNotEmpty).toSet();
+    final existingSnap = await OfflineFirestoreHelper.getQueryOfflineSafe(col);
+    final resolvedLines = lines.map((l) {
+      if (l.id.isNotEmpty) return l;
+      if (l.isAuto) return l.copyWith(id: _deterministicAutoId(l));
+      return l;
+    }).toList();
+    final incomingIds = resolvedLines
+        .map((l) => l.id)
+        .where((id) => id.isNotEmpty)
+        .toSet();
 
     final batch = _firestore.batch();
     final now = FieldValue.serverTimestamp();
@@ -76,7 +94,7 @@ class RequirementsRepository {
       }
     }
 
-    for (final line in lines) {
+    for (final line in resolvedLines) {
       final docRef = line.id.isNotEmpty ? col.doc(line.id) : col.doc();
       final data = line.copyWith(id: docRef.id).toMap();
       data['updatedAt'] = now;
@@ -89,7 +107,7 @@ class RequirementsRepository {
       SetOptions(merge: true),
     );
 
-    await batch.commit();
+    await OfflineFirestoreHelper.commitBatchOfflineSafe(batch);
   }
 
   Future<void> upsertLine({
@@ -106,7 +124,9 @@ class RequirementsRepository {
     if (line.id.isEmpty) {
       data['createdAt'] = now;
     }
-    await docRef.set(data, SetOptions(merge: true));
+    await OfflineFirestoreHelper.writeOfflineSafe(
+      docRef.set(data, SetOptions(merge: true)),
+    );
   }
 
   /// Deletes a manual line or marks an auto line as `dismissed = true` so
@@ -119,12 +139,14 @@ class RequirementsRepository {
     if (workshopId.isEmpty || projectId.isEmpty || line.id.isEmpty) return;
     final docRef = _reqCol(workshopId, projectId).doc(line.id);
     if (line.isAuto) {
-      await docRef.update({
-        'dismissed': true,
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
+      await OfflineFirestoreHelper.writeOfflineSafe(
+        docRef.update({
+          'dismissed': true,
+          'updatedAt': FieldValue.serverTimestamp(),
+        }),
+      );
     } else {
-      await docRef.delete();
+      await OfflineFirestoreHelper.writeOfflineSafe(docRef.delete());
     }
   }
 
@@ -152,7 +174,9 @@ class RequirementsRepository {
   }) async {
     if (workshopId.isEmpty || projectId.isEmpty) return 0;
     final col = _reqCol(workshopId, projectId);
-    final snap = await col.where('dismissed', isEqualTo: true).get();
+    final snap = await OfflineFirestoreHelper.getQueryOfflineSafe(
+      col.where('dismissed', isEqualTo: true),
+    );
     if (snap.docs.isEmpty) return 0;
 
     final batch = _firestore.batch();
@@ -163,7 +187,7 @@ class RequirementsRepository {
         'updatedAt': now,
       });
     }
-    await batch.commit();
+    await OfflineFirestoreHelper.commitBatchOfflineSafe(batch);
     return snap.docs.length;
   }
 
@@ -178,12 +202,14 @@ class RequirementsRepository {
       line.requiredQty,
       line.inStockQty,
     );
-    await _reqCol(workshopId, projectId).doc(line.id).update({
-      'toBuyQty': defaultToBuy,
-      'isToBuyOverridden': false,
-      'needsReviewAfterRegen': false,
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
+    await OfflineFirestoreHelper.writeOfflineSafe(
+      _reqCol(workshopId, projectId).doc(line.id).update({
+        'toBuyQty': defaultToBuy,
+        'isToBuyOverridden': false,
+        'needsReviewAfterRegen': false,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }),
+    );
   }
 }
 

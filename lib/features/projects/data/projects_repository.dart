@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../core/firebase/offline_firestore_helper.dart';
 import '../domain/models/project.dart';
 import '../domain/models/project_unit.dart';
 
@@ -51,7 +52,9 @@ class FirestoreProjectsRepository implements ProjectsRepository {
 
   @override
   Future<Project?> getProject(String workshopId, String projectId) async {
-    final doc = await _projectsCol(workshopId).doc(projectId).get();
+    final doc = await OfflineFirestoreHelper.getDocOfflineSafe(
+      _projectsCol(workshopId).doc(projectId),
+    );
     if (!doc.exists) return null;
     return Project.fromFirestore(doc);
   }
@@ -59,7 +62,9 @@ class FirestoreProjectsRepository implements ProjectsRepository {
   @override
   Future<String?> findProjectWorkshop(List<String> workshopIds, String projectId) async {
     for (final wid in workshopIds) {
-      final doc = await _projectsCol(wid).doc(projectId).get();
+      final doc = await OfflineFirestoreHelper.getDocOfflineSafe(
+        _projectsCol(wid).doc(projectId),
+      );
       if (doc.exists) return wid;
     }
     return null;
@@ -73,20 +78,22 @@ class FirestoreProjectsRepository implements ProjectsRepository {
       createdAt: DateTime.now(),
       updatedAt: DateTime.now(),
     );
-    await ref.set(newProject.toMap());
+    await OfflineFirestoreHelper.writeOfflineSafe(ref.set(newProject.toMap()));
     return ref.id;
   }
 
   @override
   Future<void> updateProject(Project project) async {
-    await _projectsCol(project.workshopId).doc(project.id).update({
-      'name': project.name,
-      'clientName': project.clientName,
-      'clientPhone': project.clientPhone,
-      'location': project.location,
-      'status': project.status,
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
+    await OfflineFirestoreHelper.writeOfflineSafe(
+      _projectsCol(project.workshopId).doc(project.id).update({
+        'name': project.name,
+        'clientName': project.clientName,
+        'clientPhone': project.clientPhone,
+        'location': project.location,
+        'status': project.status,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }),
+    );
   }
 
   @override
@@ -94,27 +101,29 @@ class FirestoreProjectsRepository implements ProjectsRepository {
     final batch = _firestore.batch();
 
     // 1. Delete subcollection units
-    final units = await _unitsCol(workshopId, projectId).get();
+    final units = await OfflineFirestoreHelper.getQueryOfflineSafe(
+      _unitsCol(workshopId, projectId),
+    );
     for (final u in units.docs) {
       batch.delete(u.reference);
     }
 
     // 2. Delete subcollection requirements (Project Materials Requirements table)
-    final reqs = await _projectsCol(workshopId)
-        .doc(projectId)
-        .collection('requirements')
-        .get();
+    final reqs = await OfflineFirestoreHelper.getQueryOfflineSafe(
+      _projectsCol(workshopId).doc(projectId).collection('requirements'),
+    );
     for (final req in reqs.docs) {
       batch.delete(req.reference);
     }
 
     // 3. Delete cut plans for this project & collect planIds + consumedRemnantIds
-    final plans = await _firestore
-        .collection('workshops')
-        .doc(workshopId)
-        .collection('cutPlans')
-        .where('projectId', isEqualTo: projectId)
-        .get();
+    final plans = await OfflineFirestoreHelper.getQueryOfflineSafe(
+      _firestore
+          .collection('workshops')
+          .doc(workshopId)
+          .collection('cutPlans')
+          .where('projectId', isEqualTo: projectId),
+    );
 
     final planIds = <String>[];
     final consumedRemnantIdsFromPlans = <String>{};
@@ -136,12 +145,13 @@ class FirestoreProjectsRepository implements ProjectsRepository {
     }
 
     // 4. Delete remnants originating from this project
-    final remnants = await _firestore
-        .collection('workshops')
-        .doc(workshopId)
-        .collection('remnants')
-        .where('sourceProjectId', isEqualTo: projectId)
-        .get();
+    final remnants = await OfflineFirestoreHelper.getQueryOfflineSafe(
+      _firestore
+          .collection('workshops')
+          .doc(workshopId)
+          .collection('remnants')
+          .where('sourceProjectId', isEqualTo: projectId),
+    );
 
     final deletedOriginRemnantIds = <String>{};
     for (final r in remnants.docs) {
@@ -156,12 +166,13 @@ class FirestoreProjectsRepository implements ProjectsRepository {
         i,
         i + 10 > planIds.length ? planIds.length : i + 10,
       );
-      final consumedSnap = await _firestore
-          .collection('workshops')
-          .doc(workshopId)
-          .collection('remnants')
-          .where('usedInPlanId', whereIn: chunk)
-          .get();
+      final consumedSnap = await OfflineFirestoreHelper.getQueryOfflineSafe(
+        _firestore
+            .collection('workshops')
+            .doc(workshopId)
+            .collection('remnants')
+            .where('usedInPlanId', whereIn: chunk),
+      );
       for (final rDoc in consumedSnap.docs) {
         if (!deletedOriginRemnantIds.contains(rDoc.id)) {
           remnantsToRestore.add(rDoc.reference);
@@ -176,7 +187,7 @@ class FirestoreProjectsRepository implements ProjectsRepository {
             .doc(workshopId)
             .collection('remnants')
             .doc(remId);
-        final remSnap = await remRef.get();
+        final remSnap = await OfflineFirestoreHelper.getDocOfflineSafe(remRef);
         if (remSnap.exists) {
           remnantsToRestore.add(remRef);
         }
@@ -192,23 +203,25 @@ class FirestoreProjectsRepository implements ProjectsRepository {
     }
 
     // 6. Delete workshop cart items originating from this project
-    final cartItems = await _firestore
-        .collection('workshops')
-        .doc(workshopId)
-        .collection('cart')
-        .where('sourceProjectId', isEqualTo: projectId)
-        .get();
+    final cartItems = await OfflineFirestoreHelper.getQueryOfflineSafe(
+      _firestore
+          .collection('workshops')
+          .doc(workshopId)
+          .collection('cart')
+          .where('sourceProjectId', isEqualTo: projectId),
+    );
     for (final c in cartItems.docs) {
       batch.delete(c.reference);
     }
 
     // 7. Clean up draft orders in `orders` collection related to this project
     try {
-      final draftOrders = await _firestore
-          .collection('orders')
-          .where('workshopId', isEqualTo: workshopId)
-          .where('status', isEqualTo: 'draft')
-          .get();
+      final draftOrders = await OfflineFirestoreHelper.getQueryOfflineSafe(
+        _firestore
+            .collection('orders')
+            .where('workshopId', isEqualTo: workshopId)
+            .where('status', isEqualTo: 'draft'),
+      );
       for (final ordDoc in draftOrders.docs) {
         final data = ordDoc.data();
         final rawItems = (data['items'] as List<dynamic>?) ?? const [];
@@ -250,15 +263,17 @@ class FirestoreProjectsRepository implements ProjectsRepository {
     // 8. Delete the project document itself
     batch.delete(_projectsCol(workshopId).doc(projectId));
 
-    await batch.commit();
+    await OfflineFirestoreHelper.commitBatchOfflineSafe(batch);
 
-    // 9. Best-effort cleanup of cut plan PDFs in Firebase Storage
-    for (final planId in planIds) {
-      try {
-        await FirebaseStorage.instance
-            .ref('workshops/$workshopId/cut-plans/$planId/cut_plan.pdf')
-            .delete();
-      } catch (_) {}
+    // 9. Best-effort cleanup of cut plan PDFs in Firebase Storage (only if online)
+    if (OfflineFirestoreHelper.isOnline) {
+      for (final planId in planIds) {
+        try {
+          await FirebaseStorage.instance
+              .ref('workshops/$workshopId/cut-plans/$planId/cut_plan.pdf')
+              .delete();
+        } catch (_) {}
+      }
     }
   }
 
@@ -273,7 +288,9 @@ class FirestoreProjectsRepository implements ProjectsRepository {
 
   @override
   Future<ProjectUnit?> getUnit(String workshopId, String projectId, String unitId) async {
-    final doc = await _unitsCol(workshopId, projectId).doc(unitId).get();
+    final doc = await OfflineFirestoreHelper.getDocOfflineSafe(
+      _unitsCol(workshopId, projectId).doc(unitId),
+    );
     if (!doc.exists) return null;
     return ProjectUnit.fromFirestore(doc);
   }
@@ -298,7 +315,7 @@ class FirestoreProjectsRepository implements ProjectsRepository {
         'unitCount': FieldValue.increment(1),
         'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
-      await batch.commit();
+      await OfflineFirestoreHelper.commitBatchOfflineSafe(batch);
       return docRef.id;
     } else {
       // Existing unit update
@@ -308,7 +325,7 @@ class FirestoreProjectsRepository implements ProjectsRepository {
       batch.set(projectRef, {
         'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
-      await batch.commit();
+      await OfflineFirestoreHelper.commitBatchOfflineSafe(batch);
       return unit.id;
     }
   }
@@ -321,7 +338,7 @@ class FirestoreProjectsRepository implements ProjectsRepository {
       'unitCount': FieldValue.increment(-1),
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
-    await batch.commit();
+    await OfflineFirestoreHelper.commitBatchOfflineSafe(batch);
   }
 }
 

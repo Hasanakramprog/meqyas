@@ -5,6 +5,7 @@ import 'package:maqyas_engine/maqyas_engine.dart';
 import 'package:printing/printing.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../app/theme/app_colors.dart';
+import '../../../core/firebase/offline_firestore_helper.dart';
 import '../../auth/presentation/controllers/auth_controller.dart';
 import '../../catalog/data/catalog_repository.dart';
 import '../../catalog/domain/catalog_item.dart';
@@ -2326,12 +2327,17 @@ class _ProjectRequirementsScreenState
                               Navigator.pop(ctx);
                             }
                             if (context.mounted) {
+                              final isOnlineNow = OfflineFirestoreHelper.isOnline;
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
                                   content: Text(
-                                    'تم إرسال الطلب إلى «${selectedSupplier!.name}» بنجاح ✅',
+                                    isOnlineNow
+                                        ? 'تم إرسال الطلب إلى «${selectedSupplier!.name}» بنجاح ✅'
+                                        : 'تم حفظ الطلب محلياً ⏳ وسيتم إرساله إلى «${selectedSupplier!.name}» تلقائياً فور توفر الإنترنت',
                                   ),
-                                  backgroundColor: AppColors.success,
+                                  backgroundColor: isOnlineNow
+                                      ? AppColors.success
+                                      : AppColors.warning,
                                   action: SnackBarAction(
                                     label: 'تتبع الطلب',
                                     textColor: Colors.white,

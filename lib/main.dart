@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'app/router/app_router.dart';
 import 'app/theme/app_theme.dart';
 import 'core/firebase/firebase_config.dart';
+import 'core/widgets/offline_sync_banner.dart';
 import 'features/home/presentation/home_screen.dart';
 
 void main() async {
@@ -27,6 +28,9 @@ class MeqyasApp extends ConsumerWidget {
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,
       themeMode: themeMode,
+      builder: (context, child) => OfflineSyncShell(
+        child: child ?? const SizedBox.shrink(),
+      ),
       // Enforce Arabic RTL as default
       locale: const Locale('ar'),
       supportedLocales: const [

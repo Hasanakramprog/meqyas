@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import '../../../core/firebase/offline_firestore_helper.dart';
 import '../domain/app_user.dart';
 import '../domain/auth_repository.dart';
 import '../domain/user_role.dart';
@@ -12,11 +13,16 @@ class FirebaseAuthRepository implements AuthRepository {
   final FirebaseFirestore _firestore;
   final FirebaseFunctions _functions;
 
+  /// Non-null when this device was automatically signed out because another device
+  /// signed into the same account (`Single-Device Session Lock`).
+  static String? lastSessionConflictMessage;
+
   StreamSubscription<User?>? _authSubscription;
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _userDocSubscription;
   final _authStateController = StreamController<AppUser?>.broadcast();
   AppUser? _currentUser;
   bool _hasEmittedInitial = false;
+  String? _localSessionId;
 
   FirebaseAuthRepository({
     FirebaseAuth? auth,
@@ -61,22 +67,31 @@ class FirebaseAuthRepository implements AuthRepository {
             debugPrint('Failed to read cached ID token claims: $e');
           }
 
-          // Fetch initial users/{uid} document first so role, workshopId/supplierId,
-          // and isEmailVerified are accurate on Cloud Firebase even without custom claims
+          // 1) Read users/{uid} from local SQLite cache FIRST for instant (< 50ms)
+          //    startup in Airplane Mode, then fall back to network if not cached yet.
           try {
-            final initialDoc = await _firestore
-                .collection('users')
-                .doc(firebaseUser.uid)
-                .get();
+            final userRef = _firestore.collection('users').doc(firebaseUser.uid);
+            DocumentSnapshot<Map<String, dynamic>>? initialDoc;
+            try {
+              final cached = await userRef.get(const GetOptions(source: Source.cache));
+              if (cached.exists && cached.data() != null) {
+                initialDoc = cached;
+              }
+            } catch (_) {}
+
+            initialDoc ??= await OfflineFirestoreHelper.getDocOfflineSafe(userRef);
+
             if (initialDoc.exists && initialDoc.data() != null) {
+              final docData = initialDoc.data()!;
+              _localSessionId ??= docData['activeSessionId'] as String?;
               _emitAuthState(
                 AppUser.fromMap(
-                  initialDoc.data()!,
+                  docData,
                   firebaseUser.uid,
                   isEmailVerified: firebaseUser.emailVerified,
                 ),
               );
-            } else {
+            } else if (OfflineFirestoreHelper.isOnline) {
               // Self-heal if a user registered when the batch failed or before users/{uid} was written
               final resolvedRole = UserRole.fromCode(roleStr);
               var resolvedWorkshopId = workshopId;
@@ -85,36 +100,43 @@ class FirebaseAuthRepository implements AuthRepository {
                 final wRef = _firestore.collection('workshops').doc();
                 resolvedWorkshopId = wRef.id;
                 try {
-                  await wRef.set({
-                    'id': wRef.id,
-                    'name': firebaseUser.displayName?.isNotEmpty == true
-                        ? 'ورشة ${firebaseUser.displayName}'
-                        : 'ورشة جديدة',
-                    'ownerUid': firebaseUser.uid,
-                    'phone': '',
-                    'location': '',
-                    'status': 'active',
-                    'createdAt': FieldValue.serverTimestamp(),
-                    'updatedAt': FieldValue.serverTimestamp(),
-                  });
+                  await OfflineFirestoreHelper.writeOfflineSafe(
+                    wRef.set({
+                      'id': wRef.id,
+                      'name': firebaseUser.displayName?.isNotEmpty == true
+                          ? 'ورشة ${firebaseUser.displayName}'
+                          : 'ورشة جديدة',
+                      'ownerUid': firebaseUser.uid,
+                      'phone': '',
+                      'location': '',
+                      'status': 'active',
+                      'createdAt': FieldValue.serverTimestamp(),
+                      'updatedAt': FieldValue.serverTimestamp(),
+                    }),
+                  );
                 } catch (e) {
                   debugPrint('Self-heal workshop creation notice: $e');
                 }
               }
+              final newSessionId = _generateSessionId(firebaseUser.uid);
+              _localSessionId = newSessionId;
               try {
-                await _firestore.collection('users').doc(firebaseUser.uid).set({
-                  'uid': firebaseUser.uid,
-                  'email': firebaseUser.email ?? '',
-                  'fullName': firebaseUser.displayName ?? '',
-                  'phone': '',
-                  'isEmailVerified': firebaseUser.emailVerified,
-                  'role': resolvedRole.code,
-                  'status': 'active',
-                  'workshopId': resolvedWorkshopId,
-                  'supplierId': supplierId,
-                  'createdAt': FieldValue.serverTimestamp(),
-                  'updatedAt': FieldValue.serverTimestamp(),
-                }, SetOptions(merge: true));
+                await OfflineFirestoreHelper.writeOfflineSafe(
+                  _firestore.collection('users').doc(firebaseUser.uid).set({
+                    'uid': firebaseUser.uid,
+                    'email': firebaseUser.email ?? '',
+                    'fullName': firebaseUser.displayName ?? '',
+                    'phone': '',
+                    'isEmailVerified': firebaseUser.emailVerified,
+                    'role': resolvedRole.code,
+                    'status': 'active',
+                    'workshopId': resolvedWorkshopId,
+                    'supplierId': supplierId,
+                    'activeSessionId': newSessionId,
+                    'createdAt': FieldValue.serverTimestamp(),
+                    'updatedAt': FieldValue.serverTimestamp(),
+                  }, SetOptions(merge: true)),
+                );
               } catch (e) {
                 debugPrint('Self-heal user doc creation notice: $e');
               }
@@ -127,6 +149,19 @@ class FirebaseAuthRepository implements AuthRepository {
                   isEmailVerified: firebaseUser.emailVerified,
                   role: resolvedRole,
                   workshopId: resolvedWorkshopId,
+                  supplierId: supplierId,
+                ),
+              );
+            } else {
+              _emitAuthState(
+                AppUser(
+                  uid: firebaseUser.uid,
+                  email: firebaseUser.email ?? '',
+                  fullName: firebaseUser.displayName ?? '',
+                  phone: '',
+                  isEmailVerified: firebaseUser.emailVerified,
+                  role: UserRole.fromCode(roleStr),
+                  workshopId: workshopId,
                   supplierId: supplierId,
                 ),
               );
@@ -147,15 +182,37 @@ class FirebaseAuthRepository implements AuthRepository {
             );
           }
 
-          // Listen to users/{uid} document in Firestore
+          // Listen to users/{uid} document in Firestore (with metadata for Single-Device Session Lock)
           _userDocSubscription = _firestore
               .collection('users')
               .doc(firebaseUser.uid)
-              .snapshots()
+              .snapshots(includeMetadataChanges: true)
               .listen(
             (doc) {
               if (doc.exists && doc.data() != null) {
                 final data = doc.data()!;
+                final remoteSessionId = data['activeSessionId'] as String?;
+
+                // Single-Device Session Lock:
+                // Only enforce when receiving a confirmed live server snapshot (not cache, no pending local writes)
+                if (!doc.metadata.isFromCache &&
+                    !doc.metadata.hasPendingWrites &&
+                    remoteSessionId != null &&
+                    remoteSessionId.isNotEmpty) {
+                  if (_localSessionId == null) {
+                    _localSessionId = remoteSessionId;
+                  } else if (_localSessionId != remoteSessionId) {
+                    lastSessionConflictMessage =
+                        'تم تسجيل الدخول إلى هذا الحساب من جهاز آخر. يُسمح بجهاز نشط واحد فقط لمنع تضارب البيانات.';
+                    unawaited(signOut());
+                    return;
+                  }
+                } else if (_localSessionId == null &&
+                    remoteSessionId != null &&
+                    remoteSessionId.isNotEmpty) {
+                  _localSessionId = remoteSessionId;
+                }
+
                 _currentUser = AppUser.fromMap(
                   data,
                   firebaseUser.uid,
@@ -195,8 +252,23 @@ class FirebaseAuthRepository implements AuthRepository {
   @override
   AppUser? get currentUser => _currentUser;
 
+  String _generateSessionId(String uid) {
+    final shortUid = uid.length >= 6 ? uid.substring(0, 6) : uid;
+    return 'sess_${DateTime.now().millisecondsSinceEpoch}_$shortUid';
+  }
+
   @override
   Future<void> signUp(SignUpData data) async {
+    final online = await OfflineFirestoreHelper.checkConnectivityNow();
+    if (!online) {
+      throw FirebaseAuthException(
+        code: 'network-request-failed',
+        message: 'لا يوجد اتصال بالإنترنت حالياً. إنشاء حساب جديد يتطلب اتصالاً بالإنترنت.',
+      );
+    }
+
+    lastSessionConflictMessage = null;
+
     // 1. Create auth user with email & password
     final cred = await _auth.createUserWithEmailAndPassword(
       email: data.email.trim(),
@@ -207,6 +279,9 @@ class FirebaseAuthRepository implements AuthRepository {
     if (user == null) {
       throw Exception('فشل إنشاء المستخدم في نظام المصادقة');
     }
+
+    final sessionId = _generateSessionId(user.uid);
+    _localSessionId = sessionId;
 
     await user.updateDisplayName(data.fullName.trim());
 
@@ -226,6 +301,12 @@ class FirebaseAuthRepository implements AuthRepository {
         'workshopName': data.workshopName.trim(),
         'workshopLocation': data.workshopLocation.trim(),
       });
+      await OfflineFirestoreHelper.writeOfflineSafe(
+        _firestore.collection('users').doc(user.uid).set({
+          'activeSessionId': sessionId,
+          'updatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true)),
+      );
     } catch (e) {
       debugPrint('bootstrapOwner Cloud Function unavailable, using direct Firestore bootstrap: $e');
       final workshopRef = _firestore.collection('workshops').doc();
@@ -240,6 +321,7 @@ class FirebaseAuthRepository implements AuthRepository {
         'status': 'active',
         'workshopId': workshopRef.id,
         'supplierId': null,
+        'activeSessionId': sessionId,
         'createdAt': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
       });
@@ -262,16 +344,48 @@ class FirebaseAuthRepository implements AuthRepository {
 
   @override
   Future<void> signIn(SignInData data) async {
+    final online = await OfflineFirestoreHelper.checkConnectivityNow();
+    if (!online) {
+      throw FirebaseAuthException(
+        code: 'network-request-failed',
+        message: 'لا يوجد اتصال بالإنترنت حالياً. تسجيل الدخول يتطلب اتصالاً بالإنترنت.',
+      );
+    }
+
+    lastSessionConflictMessage = null;
+
     final cred = await _auth.signInWithEmailAndPassword(
       email: data.email.trim(),
       password: data.password,
     );
 
-    await cred.user?.getIdToken(true);
+    final user = cred.user;
+    if (user != null) {
+      final sessionId = _generateSessionId(user.uid);
+      _localSessionId = sessionId;
+      try {
+        await OfflineFirestoreHelper.writeOfflineSafe(
+          _firestore.collection('users').doc(user.uid).set({
+            'activeSessionId': sessionId,
+            'updatedAt': FieldValue.serverTimestamp(),
+          }, SetOptions(merge: true)),
+        );
+      } catch (e) {
+        debugPrint('Failed to write activeSessionId on signIn: $e');
+      }
+      await user.getIdToken(true);
+    }
   }
 
   @override
   Future<void> sendPasswordReset(String email) async {
+    final online = await OfflineFirestoreHelper.checkConnectivityNow();
+    if (!online) {
+      throw FirebaseAuthException(
+        code: 'network-request-failed',
+        message: 'لا يوجد اتصال بالإنترنت حالياً. استعادة كلمة المرور تتطلب اتصالاً بالإنترنت.',
+      );
+    }
     await _auth.sendPasswordResetEmail(email: email.trim());
   }
 
@@ -334,6 +448,7 @@ class FirebaseAuthRepository implements AuthRepository {
   @override
   Future<void> signOut() async {
     _userDocSubscription?.cancel();
+    _localSessionId = null;
     await _auth.signOut();
   }
 

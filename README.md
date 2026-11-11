@@ -1,17 +1,228 @@
-# meqyas
+# 📐 مِقْيَاس (Meqyas)
 
-A new Flutter project.
+<p align="center">
+  <img src="https://img.shields.io/badge/Flutter-3.x-02569B?logo=flutter&logoColor=white" alt="Flutter" />
+  <img src="https://img.shields.io/badge/Dart-3.x-0175C2?logo=dart&logoColor=white" alt="Dart" />
+  <img src="https://img.shields.io/badge/State%20Management-Riverpod%203.x-blueviolet" alt="Riverpod" />
+  <img src="https://img.shields.io/badge/Backend-Firebase%20Cloud-FFA000?logo=firebase&logoColor=white" alt="Firebase" />
+  <img src="https://img.shields.io/badge/Platform-iOS%20%7C%20Android%20%7C%20macOS-success" alt="Platform" />
+  <img src="https://img.shields.io/badge/Language-Arabic%20(RTL)-important" alt="RTL Arabic" />
+  <img src="https://img.shields.io/badge/Offline--First-100%25%20Enabled-brightgreen" alt="Offline-First" />
+</p>
 
-## Getting Started
+> **منصة هندسية ذكية متكاملة لإدارة وتصنيع الألمنيوم، تحسين القص وتقليل الهدر، وإدارة سلاسل التوريد والطلبات.**  
+> *Smart Aluminum Fabrication, 1D Cut Optimization & Interactive Supply Chain Platform.*
 
-This project is a starting point for a Flutter application.
+---
 
-A few resources to get you started if this is your first Flutter project:
+## 📑 جدول المحتويات (Table of Contents)
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+1. [نظرة عامة (Overview)](#-نظرة-عامة-overview)
+2. [البوابات والأدوار الثلاثة (User Portals)](#-البوابات-والأدوار-الثلاثة-user-portals)
+3. [المحرك الهندسي الذكي (maqyas_engine)](#-المحرك-الهندسي-الذكي-maqyas_engine)
+4. [محرك تحسين القص وإدارة الفضلات (1D Cut Optimization & Remnants)](#-محرك-تحسين-القص-وإدارة-الفضلات-1d-cut-optimization--remnants)
+5. [جدول الاحتياجات ودورة التسعير مع الموردين (Supply Chain & Quoting)](#-جدول-الاحتياجات-ودورة-التسعير-مع-الموردين-supply-chain--quoting)
+6. [معمارية العمل بدون إنترنت (100% Offline-First Architecture)](#-معمارية-العمل-بدون-إنترنت-100-offline-first-architecture)
+7. [التقنيات المستخدمة (Tech Stack)](#-التقنيات-المستخدمة-tech-stack)
+8. [هيكل المشروع (Project Structure)](#-هيكل-المشروع-project-structure)
+9. [التشغيل والإعداد (Getting Started)](#-التشغيل-والإعداد-getting-started)
+10. [بيانات الدخول التجريبية (Demo Credentials)](#-بيانات-الدخول-التجريبية-demo-credentials)
+11. [خريطة الطريق القادمة (Roadmap)](#-خريطة-الطريق-القادمة-roadmap)
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+---
+
+## 🌟 نظرة عامة (Overview)
+
+تم بناء **مِقْيَاس (Meqyas)** لحل أكبر التحديات في ورش ومعامل الألمنيوم:
+- **الحسابات اليدوية المعقدة للقطاعات والزجاج:** تحويل مقاسات الفتحات (W × H) آلياً إلى أطوال دقيقة لكل قطاع، لوح زجاج، وإكسسوار.
+- **هدر الألمنيوم المرتفع:** خوارزمية ذكية لاستهلاك فضلات الورشة أولاً ثم توزيع القطع على الأسياخ القياسية (6.60م) بأقل نسبة هالك ممكنة.
+- **إدارة المشتريات والتسعير مع الموردين:** استخراج صافي المطلوب شراؤه وإرساله فوراً للموردين داخل التطبيق أو عبر واتساب مع عروض أسعار تفاعلية.
+- **العمل الميداني بدون إنترنت:** قدرة كاملة على العمل وحفظ المقايسات وخطط القص في مواقع البناء المنعزلة دون الحاجة لشبكة إنترنت.
+
+---
+
+## 👥 البوابات والأدوار الثلاثة (User Portals)
+
+### 1. بوابة صاحب الورشة / المعلم (Workshop Owner)
+- **إدارة المشاريع والوحدات:** إضافة الشبابيك والأبواب والواجهات بمختلف الخيارات (سحاب، مفصلي، زجاج مفرد/مزدوج، منخل، شرحات، زوايا، عجل).
+- **استيراد وتصدير Excel (`.xlsx`):** استيراد مقايسات مشاريع كاملة من ملفات إكسل بضغطة زر.
+- **تخصيص المعادلات بأمان (Locked Formula Editor):** المعلم يمكنه تعديل خصومات ورشته الخاصة، مع قفل هيكل المعادلة وتقييد القيم بنطاق آمن ($\pm 50\%$) لمنع الأخطاء المطبعية المكلفة.
+- **خطة القص ومخزن الفضلات:** معاينة بصرية للأسياخ والفضلات، إضافة فضلات ومخزون يدوياً، واستخراج ملصقات QR وجداول قص PDF.
+- **جدول الاحتياجات والطلبات:** حساب المطلوب شراؤه ومتابعة عروض أسعار الموردين واعتمادها.
+
+### 2. بوابة المورد (Supplier Portal)
+- **استقبال طلبات التوريد:** وصول طلبات التسعير من الورش فوراً مع جدول الأصناف وملاحظات المشروع.
+- **التسعير التفاعلي (Interactive Quoting):** تحديد الأصناف المتوفرة وتعديل الكميات وإدخال الأسعار الفردية والملاحظات وإرسال عرض السعر للمعلم بضغطة واحدة.
+- **متابعة الطلبات:** تتبع الحالات من (`مُرسل` -> `مُسعّر` -> `مُعتمد` -> `قيد التجهيز` -> `مكتمل`).
+
+### 3. بوابة مدير النظام (System Admin)
+- **إدارة وتفعيل المستخدمين:** تفعيل حسابات الورش والموردين الجدد بضغطة واحدة (`1-Tap Activation`) مع فلاتر حسب الصلاحية والحالة.
+- **إدارة أنظمة القطاعات والمعادلات:** محرر متكامل لكتابة واعتماد معادلات الأنظمة الهندسية مع فاحص أخطاء (`Validator`)، بيئة تجربة ومقارنة نتائج (`Sandbox`)، وكاشف تضارب الشروط (`Conflict Detector`).
+- **إدارة الموردين والكتالوج:** سجل الموردين المعتمدين وتصنيفات الكتالوج وسجلات التدقيق (`Audit Logs`).
+
+---
+
+## 🧠 المحرك الهندسي الذكي (`packages/maqyas_engine`)
+
+حزمة Dart نقية ومستقلة (`Pure Dart Package`) دون أي اعتماديات خارجية على Flutter أو Firebase، مما يجعلها سريعة وحتمية وسهلة الفحص المخبري (100% Unit Tested):
+
+```
+packages/maqyas_engine/lib/src/
+├── ast/        # مترجم ومحلل المعادلات (Abstract Syntax Tree)
+├── graph/      # الرسم البياني للاعتماديات والترتيب الطوبولوجي (Kahn's Topological Sort)
+├── models/     # العقود والنماذج (UnitSpecification, CalculationRule, CutPiece)
+├── rules/      # منتقي القواعد، فاحص الشروط، بيئة التجربة، واكتشاف التضارب
+├── engine/     # CalculatorEngine (تحويل مقاس الشباك إلى كافة القطع والزجاج والإكسسوارات)
+└── optimizer/  # CutOptimizer (القص الخطي 1D) و MeshOptimizer (الشبك ثنائي الأبعاد 2D)
+```
+
+- **تحليل المعادلات النصية عبر AST:** تحويل معادلات نصوص Firestore مثل `(W - 1.5) / sashCount` إلى شجرة كائنات حسابية وتنفيذها داخل بيئة Dart المغلقة بما يتماشى مع معايير Apple App Store الصارمة ضد التفسير الديناميكي غير الآمن.
+- **منع الاعتماد الدائري (Circular Dependency Detection):** كشف أي حلقات خطأ في المعادلات تلقائياً وحساب القطع بالترتيب السليم (مثال: `kaab_len -> glass_width`).
+
+---
+
+## 🪚 محرك تحسين القص وإدارة الفضلات (1D Cut Optimization & Remnants)
+
+- **استراتيجية الفضلات أولاً (Remnant-First Priority):** قبل فتح أي سيخ جديد بطول `660 سم`، يبحث المحرك في فضلات الورشة المتوفرة ليستهلكها أولاً.
+- **خوارزمية تناقص الملاءمة الأولى (First-Fit Decreasing):** ترتيب القطع تنازلياً وتعبئتها في أقل عدد أسياخ ممكن.
+- **الحسابات الفيزيائية الدقيقة:**
+  - هالك طارة السيخ الجديد (`4 سم` = `2 سم` من كل طرف) و `0 سم` للفضلات المعالجة سابقاً.
+  - هالك منشار القص (`Kerf = 0.5 سم`) بعد كل قصّة.
+  - عتبة الفضلة المفيدة: القطع المتبقية $\ge 50\text{ سم}$ تُسجل كفضلات قابلة لإعادة الاستخدام، والأقل من ذلك يُحسب كهالك خردة (Scrap).
+- **إدارة المخزون والفضلات اليدوية (`RemnantsScreen`):**
+  - إمكانية إضافة أي أسياخ أو فضلات يدوياً إلى مخزن الورشة مع تحديد القطاع والطول واللون والمصدر، ليدمجها المحرك فوراً في حسابات القص القادمة.
+- **ملصقات QR وماسح الكاميرا:**
+  - توليد جدول قص PDF احترافي للورشة.
+  - طباعة ملصقات QR لكل قطعة، مع ماسح باركود مدمج للتعرف فوراً على القطعة والمشروع والشباك التابع له.
+
+---
+
+## 📦 جدول الاحتياجات ودورة التسعير مع الموردين (Supply Chain & Quoting)
+
+```
+[خطة القص + المخزون] ──► [استخراج الاحتياجات الصافية]
+                                  │
+          ┌───────────────────────┼───────────────────────┐
+          ▼                       ▼                       ▼
+    [تصدير PDF]             [إرسال واتساب]          [طلب داخل التطبيق]
+                                                          │
+                                                    [بوابة المورد]
+                                                          │
+                                            [تحديد التوفر + التسعير]
+                                                          │
+                                                    [اعتماد الورشة]
+```
+
+1. **الاستخراج الآلي للاحتياجات:** حساب عدد الأسياخ الصافية المطلوبة للشراء بعد طرح الفضلات المستهلكة والمتوفر في الورشة، بالإضافة إلى مساحات الزجاج والإكسسوارات.
+2. **الطلب التفاعلي داخل التطبيق:** يصل الطلب مباشرة إلى المورد، فيقوم بتحديد الأصناف المتوفرة وإدخال الأسعار والملاحظات، ليعتمد المعلم التسعيرة بضغطة زر.
+3. **التكامل مع واتساب:** توليد ملف PDF ومسودة نصية باللغة العربية جاهزة للإرسال السريع للمورد عبر واتساب.
+
+---
+
+## 📶 معمارية العمل بدون إنترنت (100% Offline-First Architecture)
+
+تمت ترقية التطبيق بالكامل (المرحلة 9) ليعمل في ورش ومواقع العمل المنقطعة عن الإنترنت:
+
+1. **تخزين محلي لا محدود (Unlimited Firestore SQLite Cache):** تهيئة ذاكرة تخزين محلية مستمرة للمشاريع والوحدات والقواعد والفضلات والطلبات.
+2. **حفظ غير متزامن وغير حاجب للواجهة (`OfflineFirestoreHelper`):** جميع عمليات الحفظ والإضافة تنتهي محلياً في أجزاء من الثانية دون تجميد شاشات التطبيق أو انتظار السحابة.
+3. **مكتبة خطوط محلية مدمجة بالكامل (Cairo Local Fonts):** خطوط Cairo مدمجة ضمن ملفات التطبيق دون الحاجة لأي طلبات شبكية خارجية.
+4. **قفل الجلسة للجهاز الواحد (Single-Device Session Lock):** منع فتح نفس الحساب على جهازين في وقت واحد عبر `activeSessionId` لحماية الورشة من أي تضارب بيانات (Conflict-Free Sync).
+5. **شريط مزامنة ذكي وتنبيه خروج وقائي:** شريط علوي يوضح حالة الاتصال وعدد التعديلات المعلقة محلياً مع المزامنة التلقائية فور عودة الشبكة.
+
+---
+
+## 💻 التقنيات المستخدمة (Tech Stack)
+
+- **Framework:** [Flutter](https://flutter.dev) (Dart 3.x)
+- **State Management:** [Riverpod 3.x](https://riverpod.dev) (`NotifierProvider`, `StreamProvider.autoDispose.family`)
+- **Navigation:** [GoRouter](https://pub.dev/packages/go_router)
+- **Backend / Cloud:** [Firebase](https://firebase.google.com) (Authentication, Cloud Firestore, Cloud Storage, Cloud Functions)
+- **Typography & RTL:** Local Arabic `Cairo` Font Assets, Native RTL layout
+- **PDF & Barcode:** `pdf`, `printing`, `mobile_scanner`
+- **Spreadsheets:** `excel`, `file_picker`
+
+---
+
+## 📂 هيكل المشروع (Project Structure)
+
+```
+meqyas/
+├── lib/
+│   ├── app/                    # المظهر (Themes)، الموجه (Router)، والألوان
+│   ├── core/                   # تهيئة Firebase، المساعد غير المتصل، وشريط المزامنة
+│   │   ├── firebase/           # OfflineFirestoreHelper & FirebaseConfig
+│   │   └── widgets/            # OfflineSyncShell & Banners
+│   └── features/               # الميزات مقسمة حسب النطاق (Feature-First)
+│       ├── admin/              # لوحة إدارة وتفعيل المستخدمين
+│       ├── auth/               # المصادقة وقفل الجلسات
+│       ├── cut_optimization/   # خطط القص والفضلات وجداول الأسياخ
+│       ├── dashboard/          # لوحات تحكم المعلم، المورد، والأدمن
+│       ├── orders/             # طلبات وعروض أسعار الموردين
+│       ├── projects/           # إدارة المشاريع والوحدات والقياسات
+│       ├── reports/            # توليد تقارير PDF وملصقات QR
+│       ├── requirements/       # استخراج احتياجات المواد ودورة التوريد
+│       ├── rules/              # إدارة وتخصيص معادلات الورشة والأنظمة
+│       └── scanner/            # ماسح قطع الألمنيوم بكاميرا الهاتف
+├── packages/
+│   └── maqyas_engine/          # المحرك الرياضي والهندسي المستقل للأنظمة والقص
+├── updates-md/                 # خطط التطوير وتقارير المراحل
+├── test/                       # الاختبارات الآلية (Unit & Widget Tests)
+└── firestore.rules             # القواعد الأمنية المعتمدة لقاعدة البيانات
+```
+
+---
+
+## 🚀 التشغيل والإعداد (Getting Started)
+
+### المتطلبات الأساسية (Prerequisites)
+- [Flutter SDK](https://docs.flutter.dev/get-started/install) (إصدار `>= 3.13.5`)
+- [Firebase CLI](https://firebase.google.com/docs/cli) مسجل الدخول
+- جهاز هاتف (iOS أو Android) أو محاكي تشغيل
+
+### خطوات التثبيت والتشغيل (Run Instructions)
+
+```bash
+# 1. استنساخ المستودع
+git clone https://github.com/Hasanakramprog/meqyas.git
+cd meqyas
+
+# 2. تحميل الحزم والمكتبات
+flutter pub get
+cd packages/maqyas_engine && flutter pub get && cd ../..
+
+# 3. فحص الكود للتأكد من خلوه من الأخطاء
+flutter analyze
+
+# 4. تشغيل الاختبارات الآلية
+flutter test
+
+# 5. تشغيل التطبيق على الهاتف أو المحاكي
+flutter run
+```
+
+---
+
+## 🔑 بيانات الدخول التجريبية (Demo Credentials)
+
+التطبيق مربوط حالياً بالسحابة الحقيقية (`meqyas-app-2026`) ويحتوي على حسابات جاهزة لتجربة جميع الأدوار:
+
+| الدور (Role) | البريد الإلكتروني (Email) | كلمة المرور (Password) | الصلاحيات الأساسية |
+| :--- | :--- | :--- | :--- |
+| **صاحب الورشة (Owner)** | `owner@meqyas.com` | `Owner123` | المشاريع، خطط القص، الفضلات، الاحتياجات، وطلبات الموردين |
+| **المورد (Supplier)** | `supplier@meqyas.com` | `Supplier123` | استقبال طلبات التوريد، التسعير، وتحديد التوفر |
+| **مدير النظام (Admin)** | `admin@meqyas.com` | `Admin123` | تفعيل المستخدمين، إدارة القواعد والأنظمة، والكتالوج |
+
+---
+
+## 🗺️ خريطة الطريق القادمة (Roadmap)
+
+- [x] **المرحلة 1-6:** المحرك الهندسي، القص الذكي، الفضلات، المشاريع، والربط مع الموردين.
+- [x] **المرحلة 7:** إدارة وتفعيل المستخدمين ولوحة الأدمن والربط السحابي الحقيقي.
+- [x] **المرحلة 9:** معمارية العمل بدون إنترنت (100% Offline-First) وقفل الجلسات للجهاز الواحد.
+- [ ] **المرحلة 8:** الإشعارات الفورية على الهاتف (Push Notifications)، إصدار عرض سعر مالي رسمي PDF لعميل الورشة، ومركز تقارير وإحصائيات الورشة.
+
+---
+
+<p align="center">
+  صُنع بـ ❤️ لخدمة وتطوير قطاع صناعة وتجارة الألمنيوم العربي.
+</p>

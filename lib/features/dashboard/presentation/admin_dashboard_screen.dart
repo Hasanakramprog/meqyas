@@ -1,7 +1,7 @@
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../../../app/theme/app_colors.dart';
+import '../../../core/widgets/offline_sync_banner.dart';
 
 class AdminDashboardScreen extends StatelessWidget {
   const AdminDashboardScreen({super.key});
@@ -19,11 +19,7 @@ class AdminDashboardScreen extends StatelessWidget {
           IconButton(
             tooltip: 'تسجيل الخروج',
             icon: const Icon(Icons.logout_rounded),
-            onPressed: () async {
-              // Sign out from FirebaseAuth
-              await FirebaseAuth.instance.signOut();
-              if (context.mounted) context.go('/auth/login');
-            },
+            onPressed: () => OfflineLogoutGuard.confirmAndSignOut(context),
           ),
           const SizedBox(width: 8),
         ],

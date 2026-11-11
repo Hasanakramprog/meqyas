@@ -29,6 +29,13 @@ class FirebaseConfig {
         await connectToEmulators();
       }
 
+      // Enable unlimited offline SQLite cache on mobile/desktop so workshop projects,
+      // units, rules, remnants, and orders remain available 100% offline.
+      FirebaseFirestore.instance.settings = const Settings(
+        persistenceEnabled: true,
+        cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
+      );
+
       if (kIsWeb) {
         await FirebaseAuth.instance.setPersistence(Persistence.LOCAL);
       }

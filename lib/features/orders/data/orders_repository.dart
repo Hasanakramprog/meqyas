@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../core/firebase/offline_firestore_helper.dart';
 import '../domain/order_model.dart';
 
 class OrdersRepository {
@@ -120,11 +121,13 @@ class OrdersRepository {
       ],
     );
 
-    await docRef.set({
-      ...order.toMap(),
-      'createdAt': now,
-      'updatedAt': now,
-    });
+    await OfflineFirestoreHelper.writeOfflineSafe(
+      docRef.set({
+        ...order.toMap(),
+        'createdAt': now,
+        'updatedAt': now,
+      }),
+    );
 
     return docRef.id;
   }
@@ -132,7 +135,7 @@ class OrdersRepository {
   /// Updates a `draft` order or sends it (`draft` -> `sent`).
   Future<void> sendDraftOrder(String orderId, {String? actorUid}) async {
     final docRef = _col.doc(orderId);
-    final snap = await docRef.get();
+    final snap = await OfflineFirestoreHelper.getDocOfflineSafe(docRef);
     if (!snap.exists) return;
 
     final order = OrderModel.fromMap(snap.data()!, docId: snap.id);
@@ -146,11 +149,13 @@ class OrdersRepository {
       ).toMap(),
     ];
 
-    await docRef.update({
-      'status': OrderStatus.sent.name,
-      'statusHistory': updatedHistory,
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
+    await OfflineFirestoreHelper.writeOfflineSafe(
+      docRef.update({
+        'status': OrderStatus.sent.name,
+        'statusHistory': updatedHistory,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }),
+    );
   }
 
   /// Supplier submits modified items (availability, supplied quantities, manual unit prices, item notes)
@@ -162,7 +167,7 @@ class OrdersRepository {
     String? actorUid,
   }) async {
     final docRef = _col.doc(orderId);
-    final snap = await docRef.get();
+    final snap = await OfflineFirestoreHelper.getDocOfflineSafe(docRef);
     if (!snap.exists) return;
 
     final order = OrderModel.fromMap(snap.data()!, docId: snap.id);
@@ -188,14 +193,16 @@ class OrdersRepository {
       ).toMap(),
     ];
 
-    await docRef.update({
-      'items': updatedItems.map((i) => i.toMap()).toList(),
-      'totalAmount': total,
-      'supplierResponseNote': supplierResponseNote.trim(),
-      'status': OrderStatus.quoted.name,
-      'statusHistory': updatedHistory,
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
+    await OfflineFirestoreHelper.writeOfflineSafe(
+      docRef.update({
+        'items': updatedItems.map((i) => i.toMap()).toList(),
+        'totalAmount': total,
+        'supplierResponseNote': supplierResponseNote.trim(),
+        'status': OrderStatus.quoted.name,
+        'statusHistory': updatedHistory,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }),
+    );
   }
 
   /// Workshop Owner (or Supplier) approves/confirms the order.
@@ -205,7 +212,7 @@ class OrdersRepository {
     String note = 'تم اعتماد التسعيرة وتأكيد الطلب',
   }) async {
     final docRef = _col.doc(orderId);
-    final snap = await docRef.get();
+    final snap = await OfflineFirestoreHelper.getDocOfflineSafe(docRef);
     if (!snap.exists) return;
 
     final order = OrderModel.fromMap(snap.data()!, docId: snap.id);
@@ -219,13 +226,15 @@ class OrdersRepository {
       ).toMap(),
     ];
 
-    await docRef.update({
-      'status': OrderStatus.confirmed.name,
-      'confirmedBy': actorUid ?? '',
-      'confirmedAt': FieldValue.serverTimestamp(),
-      'statusHistory': updatedHistory,
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
+    await OfflineFirestoreHelper.writeOfflineSafe(
+      docRef.update({
+        'status': OrderStatus.confirmed.name,
+        'confirmedBy': actorUid ?? '',
+        'confirmedAt': FieldValue.serverTimestamp(),
+        'statusHistory': updatedHistory,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }),
+    );
   }
 
   /// Calls the transactional `confirmOrder` Cloud Function if needed.
@@ -251,7 +260,7 @@ class OrdersRepository {
     String? actorUid,
   }) async {
     final docRef = _col.doc(orderId);
-    final snap = await docRef.get();
+    final snap = await OfflineFirestoreHelper.getDocOfflineSafe(docRef);
     if (!snap.exists) return;
 
     final order = OrderModel.fromMap(snap.data()!, docId: snap.id);
@@ -267,11 +276,13 @@ class OrdersRepository {
       ).toMap(),
     ];
 
-    await docRef.update({
-      'status': newStatus.name,
-      'statusHistory': updatedHistory,
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
+    await OfflineFirestoreHelper.writeOfflineSafe(
+      docRef.update({
+        'status': newStatus.name,
+        'statusHistory': updatedHistory,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }),
+    );
   }
 }
 
