@@ -14,6 +14,14 @@ class UnitSpecification {
   final double glassThicknessMm; // 6, 8, 10
   final bool hasCorners;
   final bool hasGasket;
+  final String brushColor; // 'أسود', 'بني', 'رمادي', 'أبيض'
+  final String glassRollerType; // '', 'roller_2000_single', 'roller_2000_double'
+  final int glassRollerCount; // even count, e.g. 2, 4, 6
+  final String frameGasketType; // 'frame_gasket', 'none'
+  final String screenCornerType; // 'screen_corner', 'none'
+  final int puttyQtyPerUnit; // optional integer >= 0
+  final String meshType; // 'fiber' or 'aluminum'
+  final int meshRollWidthCm; // 0 = auto least-waste, or 80/100/120/150/180/214/240
   final Map<String, dynamic> customOptions;
 
   const UnitSpecification({
@@ -32,6 +40,14 @@ class UnitSpecification {
     this.glassThicknessMm = 6.0,
     this.hasCorners = true,
     this.hasGasket = true,
+    this.brushColor = 'أسود',
+    this.glassRollerType = '',
+    this.glassRollerCount = 4,
+    this.frameGasketType = 'frame_gasket',
+    this.screenCornerType = 'screen_corner',
+    this.puttyQtyPerUnit = 0,
+    this.meshType = 'fiber',
+    this.meshRollWidthCm = 0,
     this.customOptions = const {},
   });
 

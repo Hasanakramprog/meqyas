@@ -8,6 +8,7 @@ import '../../catalog/domain/catalog_item.dart';
 import '../../orders/data/orders_repository.dart';
 import '../../orders/domain/order_model.dart';
 import '../../pricing/data/pricing_repository.dart';
+import '../../projects/presentation/widgets/project_stepper_bar.dart';
 import '../../rules/data/rules_repository.dart';
 import '../../suppliers/data/suppliers_repository.dart';
 import '../../suppliers/domain/supplier.dart';
@@ -16,8 +17,9 @@ import '../domain/cart_item.dart';
 
 class CartScreen extends ConsumerStatefulWidget {
   final String? initialWorkshopId;
+  final String? projectId;
 
-  const CartScreen({super.key, this.initialWorkshopId});
+  const CartScreen({super.key, this.initialWorkshopId, this.projectId});
 
   @override
   ConsumerState<CartScreen> createState() => _CartScreenState();
@@ -76,6 +78,16 @@ class _CartScreenState extends ConsumerState<CartScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('سلة احتياجات المواد والتوريد'),
+        bottom: (widget.projectId != null && widget.projectId!.isNotEmpty)
+            ? PreferredSize(
+                preferredSize: const Size.fromHeight(58),
+                child: ProjectStepperBar(
+                  projectId: widget.projectId!,
+                  workshopId: workshopId,
+                  activeStep: 3,
+                ),
+              )
+            : null,
         actions: [
           TextButton.icon(
             icon: const Icon(Icons.receipt_long_rounded, size: 18),
@@ -99,6 +111,36 @@ class _CartScreenState extends ConsumerState<CartScreen> {
           ),
         ],
       ),
+      bottomNavigationBar:
+          (widget.projectId != null && widget.projectId!.isNotEmpty)
+              ? Container(
+                  padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).brightness == Brightness.dark
+                        ? AppColors.darkSurface
+                        : Colors.white,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.08),
+                        blurRadius: 8,
+                        offset: const Offset(0, -2),
+                      ),
+                    ],
+                  ),
+                  child: SafeArea(
+                    top: false,
+                    child: ElevatedButton.icon(
+                      icon: const Icon(Icons.cut_rounded),
+                      label: const Text('التالي: الانتقال إلى 4 · القصّ'),
+                      onPressed: () {
+                        context.push(
+                          '/dashboard/owner/cut-plan?projectId=${widget.projectId}&workshopId=$workshopId',
+                        );
+                      },
+                    ),
+                  ),
+                )
+              : null,
       body: cartAsync.when(
         data: (items) {
           if (items.isEmpty) {

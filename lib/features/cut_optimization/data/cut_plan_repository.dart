@@ -592,3 +592,39 @@ final savedCutPlanProvider = StreamProvider.autoDispose
         .watchSavedCutPlan(query.workshopId, query.projectId);
   },
 );
+
+/// Filters shelf remnants usable by [projectId]:
+/// 1. Available shelf remnants not produced by [projectId] itself.
+/// 2. Remnants previously consumed by [savedPlan] (so recalculating re-evaluates them).
+List<RemnantDoc> filterAvailableRemnantsForProject({
+  required List<RemnantDoc> allRemnants,
+  required String projectId,
+  SavedCutPlan? savedPlan,
+}) {
+  return allRemnants.where((r) {
+    if (r.sourceProjectId == projectId) return false;
+    if (r.isAvailable) return true;
+    if (savedPlan != null) {
+      if (r.usedInPlanId == savedPlan.id) return true;
+      if (savedPlan.result.consumedRemnantIds.contains(r.id) &&
+          (r.usedInPlanId == null || r.usedInPlanId == savedPlan.id)) {
+        return true;
+      }
+    }
+    return false;
+  }).toList();
+}
+
+/// Returns a deterministic signature for [remnants] so UI screens detect any
+/// addition, deletion, or edit (length/itemCode/color/state).
+String remnantsSignature(List<RemnantDoc> remnants) {
+  if (remnants.isEmpty) return 'none';
+  final parts = remnants
+      .map(
+        (r) =>
+            '${r.id}:${r.itemCode}:${r.color}:${r.lengthCm.toStringAsFixed(1)}:${r.state}',
+      )
+      .toList()
+    ..sort();
+  return parts.join('|');
+}

@@ -41,16 +41,26 @@ class CutOptimizer {
       );
     }
 
-    // 1. Group pieces by itemCode
+    final normDefaultColor = normalizeProfileColor(defaultColor);
+
+    // 1. Group pieces by (itemCode, normalizedColor) so different colors never share bars
     final grouped = <String, List<CutPiece>>{};
+    final groupItemCode = <String, String>{};
+    final groupColor = <String, String>{};
     for (final p in pieces) {
-      grouped.putIfAbsent(p.itemCode, () => []).add(p);
+      final pColor = normalizeProfileColor(p.color ?? normDefaultColor);
+      final key = '${p.itemCode}::$pColor';
+      grouped.putIfAbsent(key, () => []).add(p);
+      groupItemCode[key] = p.itemCode;
+      groupColor[key] = pColor;
     }
 
-    // 2. Group available remnants by itemCode
+    // 2. Group available remnants by (itemCode, normalizedColor)
     final remnantsByItem = <String, List<RemnantStock>>{};
     for (final r in availableRemnants) {
-      remnantsByItem.putIfAbsent(r.itemCode, () => []).add(r);
+      final rColor = normalizeProfileColor(r.color);
+      final key = '${r.itemCode}::$rColor';
+      remnantsByItem.putIfAbsent(key, () => []).add(r);
     }
     // Sort each group: longest remnant first
     for (final list in remnantsByItem.values) {
@@ -63,7 +73,9 @@ class CutOptimizer {
     var globalBarIndex = 1;
 
     for (final entry in grouped.entries) {
-      final itemCode = entry.key;
+      final groupKey = entry.key;
+      final itemCode = groupItemCode[groupKey]!;
+      final barColor = groupColor[groupKey]!;
       final groupPieces = entry.value;
 
       // Expand pieces by quantity into individual cuts
@@ -86,9 +98,9 @@ class CutOptimizer {
       // Sort descending (First-Fit Decreasing)
       individualCuts.sort((a, b) => b.lengthCm.compareTo(a.lengthCm));
 
-      // Available remnants for this item (mutable working copy)
+      // Available remnants for this (itemCode, color) (mutable working copy)
       final workingRemnants = List<RemnantStock>.from(
-        remnantsByItem[itemCode] ?? [],
+        remnantsByItem[groupKey] ?? [],
       );
       // Track which remnant each bar slot uses
       final remnantBarSlots = <String, _MutableBar>{}; // remnantId → bar slot
@@ -149,7 +161,7 @@ class CutOptimizer {
             final remnantBar = _MutableBar(
               barNumber: globalBarIndex++,
               itemCode: itemCode,
-              color: defaultColor,
+              color: barColor,
               usableLength: bestRemnant.lengthCm, // no trim for remnants
               sourceKind: BarSourceKind.remnant,
               sourceRemnantId: bestRemnant.id,
@@ -193,7 +205,7 @@ class CutOptimizer {
           targetBar = _MutableBar(
             barNumber: globalBarIndex++,
             itemCode: itemCode,
-            color: defaultColor,
+            color: barColor,
             usableLength: usableBarLengthCm,
           );
           fullBarsForGroup.add(targetBar);

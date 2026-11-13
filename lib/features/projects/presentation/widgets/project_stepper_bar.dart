@@ -2,8 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:meqyas/app/theme/app_colors.dart';
 
-/// 4-step project wizard bar matching the target RTL design:
-/// 1 · القياسات  →  2 · القصّ  →  3 · مراجعة البضاعة  →  4 · السلة والطلب
+/// 4-step project wizard bar matching the real-world workshop flow:
+/// 1 · القياسات  →  2 · مراجعة البضاعة  →  3 · السلة والطلب  →  4 · القصّ
+/// (Cut optimization runs automatically in the background after Step 1.)
 class ProjectStepperBar extends StatelessWidget {
   final String projectId;
   final String workshopId;
@@ -24,9 +25,9 @@ class ProjectStepperBar extends StatelessWidget {
 
   static const _steps = [
     (step: 1, label: '1 · القياسات'),
-    (step: 2, label: '2 · القصّ'),
-    (step: 3, label: '3 · مراجعة البضاعة'),
-    (step: 4, label: '4 · السلة والطلب'),
+    (step: 2, label: '2 · مراجعة البضاعة'),
+    (step: 3, label: '3 · السلة والطلب'),
+    (step: 4, label: '4 · القصّ'),
   ];
 
   void _handleTap(BuildContext context, int step) {
@@ -44,17 +45,17 @@ class ProjectStepperBar extends StatelessWidget {
         break;
       case 2:
         context.push(
-          '/dashboard/owner/cut-plan?projectId=$projectId&workshopId=$workshopId',
+          '/dashboard/owner/projects/$projectId/requirements?workshopId=$workshopId',
         );
         break;
       case 3:
         context.push(
-          '/dashboard/owner/projects/$projectId/requirements?workshopId=$workshopId&step=3',
+          '/dashboard/owner/cart?projectId=$projectId&workshopId=$workshopId',
         );
         break;
       case 4:
         context.push(
-          '/dashboard/owner/projects/$projectId/requirements?workshopId=$workshopId&step=4',
+          '/dashboard/owner/cut-plan?projectId=$projectId&workshopId=$workshopId',
         );
         break;
     }

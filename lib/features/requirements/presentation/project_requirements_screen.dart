@@ -7,6 +7,8 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../app/theme/app_colors.dart';
 import '../../../core/firebase/offline_firestore_helper.dart';
 import '../../auth/presentation/controllers/auth_controller.dart';
+import '../../cart/data/cart_repository.dart';
+import '../../cart/domain/cart_item.dart';
 import '../../catalog/data/catalog_repository.dart';
 import '../../catalog/domain/catalog_item.dart';
 import '../../cut_optimization/data/cut_plan_repository.dart';
@@ -43,9 +45,11 @@ class _ProjectRequirementsScreenState
     extends ConsumerState<ProjectRequirementsScreen> {
   bool _isGenerating = false;
   bool _isExportingPdf = false;
+  bool _isNavigatingToCart = false;
   bool _initialGenerationTriggered = false;
+  String? _lastAutoSyncedSignature;
   String _selectedCategoryFilter = 'all';
-  int _activeWizardStep = 3;
+  final int _activeWizardStep = 2;
 
   String _formatQty(double val) {
     if (val == val.roundToDouble()) {
@@ -82,6 +86,7 @@ class _ProjectRequirementsScreenState
     required Project? project,
     required List<ProjectUnit> units,
     required SavedCutPlan? savedCutPlan,
+    required List<RemnantDoc> availableRemnants,
     required List<RequirementLine> existingLines,
   }) async {
     if (_initialGenerationTriggered || _isGenerating) return;
@@ -110,6 +115,8 @@ class _ProjectRequirementsScreenState
         projectDefaults: project?.defaults,
         workshopRules: workshopRules,
         savedCutPlanResult: savedCutPlan?.result,
+        availableRemnants:
+            availableRemnants.map((r) => r.toRemnantStock()).toList(),
       );
 
       await ref.read(requirementsRepositoryProvider).saveSnapshot(
@@ -124,17 +131,92 @@ class _ProjectRequirementsScreenState
     }
   }
 
+  Future<void> _syncIfAluminumDiffers({
+    required String workshopId,
+    required List<ProjectUnit> units,
+    required SavedCutPlan? savedCutPlan,
+    required List<RemnantDoc> availableRemnants,
+    required List<RequirementLine> existingLines,
+  }) async {
+    if (_isGenerating || workshopId.isEmpty || units.isEmpty) return;
+    final engine = ref.read(calculatorEngineProvider(workshopId));
+    final workshopRules =
+        ref.read(effectiveRulesProvider(workshopId)).value ??
+            SeedRules.getSystem2000BeadedRules();
+    final project = ref
+        .read(projectDetailProvider(
+          (workshopId: workshopId, projectId: widget.projectId),
+        ))
+        .value;
+    final optimizer =
+        ref.read(cuttingOptimizerProvider(workshopId)).value ??
+            const CutOptimizer();
+    final catalogItems = ref.read(activeCatalogItemsProvider).value ?? [];
+
+    final freshAutoLines = RequirementsService.computeProjectRequirements(
+      units: units,
+      engine: engine,
+      optimizer: optimizer,
+      catalogItems: catalogItems,
+      projectDefaults: project?.defaults,
+      workshopRules: workshopRules,
+      savedCutPlanResult: null,
+      availableRemnants:
+          availableRemnants.map((r) => r.toRemnantStock()).toList(),
+    );
+
+    final freshAl = {
+      for (final l in freshAutoLines)
+        if (l.category == 'aluminum') l.id: (l.requiredQty, l.note),
+    };
+    final existingAl = {
+      for (final l in existingLines)
+        if (l.source == 'auto' && l.category == 'aluminum')
+          l.id: (l.requiredQty, l.note),
+    };
+
+    var differs = freshAl.length != existingAl.length;
+    if (!differs) {
+      for (final entry in freshAl.entries) {
+        final prev = existingAl[entry.key];
+        if (prev == null ||
+            (prev.$1 - entry.value.$1).abs() > 0.001 ||
+            prev.$2 != entry.value.$2) {
+          differs = true;
+          break;
+        }
+      }
+    }
+
+    if (differs) {
+      await _regenerateRequirements(
+        workshopId: workshopId,
+        units: units,
+        savedCutPlan: savedCutPlan,
+        availableRemnants: availableRemnants,
+        existingLines: existingLines,
+        silent: true,
+        forceLiveCut: true,
+      );
+    }
+  }
+
   Future<void> _regenerateRequirements({
     required String workshopId,
     required List<ProjectUnit> units,
     required SavedCutPlan? savedCutPlan,
+    required List<RemnantDoc> availableRemnants,
     required List<RequirementLine> existingLines,
+    bool silent = false,
+    bool forceLiveCut = false,
   }) async {
     if (_isGenerating || workshopId.isEmpty) return;
     if (units.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('لا توجد وحدات في المشروع لحساب المواد')),
-      );
+      if (!silent && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('لا توجد وحدات في المشروع لحساب المواد')),
+        );
+      }
       return;
     }
 
@@ -161,7 +243,9 @@ class _ProjectRequirementsScreenState
         catalogItems: catalogItems,
         projectDefaults: project?.defaults,
         workshopRules: workshopRules,
-        savedCutPlanResult: savedCutPlan?.result,
+        savedCutPlanResult: forceLiveCut ? null : savedCutPlan?.result,
+        availableRemnants:
+            availableRemnants.map((r) => r.toRemnantStock()).toList(),
       );
 
       final mergedLines = RequirementsService.mergeRegeneratedLines(
@@ -175,7 +259,7 @@ class _ProjectRequirementsScreenState
             lines: mergedLines,
           );
 
-      if (mounted) {
+      if (!silent && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
@@ -218,6 +302,7 @@ class _ProjectRequirementsScreenState
     final projectAsync = ref.watch(projectDetailProvider(query));
     final unitsAsync = ref.watch(projectUnitsProvider(query));
     final savedCutPlanAsync = ref.watch(savedCutPlanProvider(query));
+    final allRemnantsAsync = ref.watch(remnantsProvider(workshopId));
     final requirementsAsync = ref.watch(projectRequirementsProvider(query));
     final catalogItems = ref.watch(activeCatalogItemsProvider).value ?? [];
     // Pre-watch suppliers stream so it is ready when opening the order/WhatsApp dialogs
@@ -226,6 +311,11 @@ class _ProjectRequirementsScreenState
     final project = projectAsync.value;
     final units = unitsAsync.value ?? const [];
     final savedCutPlan = savedCutPlanAsync.value;
+    final availableRemnants = filterAvailableRemnantsForProject(
+      allRemnants: allRemnantsAsync.value ?? const <RemnantDoc>[],
+      projectId: widget.projectId,
+      savedPlan: savedCutPlan,
+    );
 
     return Directionality(
       textDirection: TextDirection.rtl,
@@ -276,7 +366,9 @@ class _ProjectRequirementsScreenState
                         workshopId: workshopId,
                         units: units,
                         savedCutPlan: savedCutPlan,
+                        availableRemnants: availableRemnants,
                         existingLines: requirementsAsync.value ?? const [],
+                        forceLiveCut: true,
                       ),
             ),
             Padding(
@@ -309,6 +401,7 @@ class _ProjectRequirementsScreenState
             if (!unitsAsync.isLoading &&
                 !savedCutPlanAsync.isLoading &&
                 !projectAsync.isLoading &&
+                !allRemnantsAsync.isLoading &&
                 allLines.isEmpty &&
                 project?.requirementsGeneratedAt == null &&
                 units.isNotEmpty) {
@@ -318,6 +411,7 @@ class _ProjectRequirementsScreenState
                   project: project,
                   units: units,
                   savedCutPlan: savedCutPlan,
+                  availableRemnants: availableRemnants,
                   existingLines: allLines,
                 );
               });
@@ -345,6 +439,40 @@ class _ProjectRequirementsScreenState
               units: units,
               savedCutPlan: savedCutPlan,
             );
+            final remSig = remnantsSignature(availableRemnants);
+            final syncSig =
+                '${project?.updatedAt.millisecondsSinceEpoch ?? 0}_${units.map((u) => '${u.id}:${u.updatedAt.millisecondsSinceEpoch}').join(',')}_$remSig';
+            if (!_isGenerating &&
+                !allRemnantsAsync.isLoading &&
+                units.isNotEmpty &&
+                project?.requirementsGeneratedAt != null &&
+                _lastAutoSyncedSignature != syncSig) {
+              final wasAlreadySyncedBefore = _lastAutoSyncedSignature != null;
+              _lastAutoSyncedSignature = syncSig;
+              if (isStale || wasAlreadySyncedBefore) {
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  _regenerateRequirements(
+                    workshopId: workshopId,
+                    units: units,
+                    savedCutPlan: savedCutPlan,
+                    availableRemnants: availableRemnants,
+                    existingLines: allLines,
+                    silent: true,
+                    forceLiveCut: true,
+                  );
+                });
+              } else {
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  _syncIfAluminumDiffers(
+                    workshopId: workshopId,
+                    units: units,
+                    savedCutPlan: savedCutPlan,
+                    availableRemnants: availableRemnants,
+                    existingLines: allLines,
+                  );
+                });
+              }
+            }
 
             final filteredLines = _selectedCategoryFilter == 'all'
                 ? activeLines
@@ -364,91 +492,9 @@ class _ProjectRequirementsScreenState
                   projectId: widget.projectId,
                   workshopId: workshopId,
                   activeStep: _activeWizardStep,
-                  onStepTapped: (step) {
-                    if (step == 3 || step == 4) {
-                      setState(() => _activeWizardStep = step);
-                      return;
-                    }
-                    if (step == 1) {
-                      context.go(
-                        '/dashboard/owner/projects/${widget.projectId}?workshopId=$workshopId',
-                      );
-                    } else if (step == 2) {
-                      context.push(
-                        '/dashboard/owner/cut-plan?projectId=${widget.projectId}&workshopId=$workshopId',
-                      );
-                    }
-                  },
                 ),
-                // 1. Staleness Warning Banner
-                if (isStale)
-                  Container(
-                    margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 10,
-                    ),
-                    decoration: BoxDecoration(
-                      color: AppColors.warning.withValues(alpha: 0.14),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: AppColors.warning.withValues(alpha: 0.5),
-                      ),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(
-                          Icons.warning_amber_rounded,
-                          color: AppColors.warning,
-                        ),
-                        const SizedBox(width: 10),
-                        const Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'تغيرت وحدات المشروع — إعادة التوليد',
-                                style: TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  color: AppColors.warning,
-                                  fontSize: 13,
-                                ),
-                              ),
-                              SizedBox(height: 2),
-                              Text(
-                                'تم تعديل وحدات المشروع أو خطة القص بعد توليد هذا الجدول. اضغط لإعادة تحديث الكميات المحسوبة مع الحفاظ على تعديلاتك اليدوية والمخزون المتوفر لديك.',
-                                style: TextStyle(fontSize: 12),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        ElevatedButton.icon(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: AppColors.warning,
-                            foregroundColor: Colors.black,
-                            visualDensity: VisualDensity.compact,
-                          ),
-                          icon: const Icon(Icons.refresh_rounded, size: 16),
-                          label: const Text(
-                            'إعادة التوليد',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 12,
-                            ),
-                          ),
-                          onPressed: _isGenerating
-                              ? null
-                              : () => _regenerateRequirements(
-                                    workshopId: workshopId,
-                                    units: units,
-                                    savedCutPlan: savedCutPlan,
-                                    existingLines: allLines,
-                                  ),
-                        ),
-                      ],
-                    ),
-                  ),
+                if (_isGenerating && allLines.isNotEmpty)
+                  const LinearProgressIndicator(minHeight: 2),
 
                 // 2. Top Summary Bar
                 Padding(
@@ -554,6 +600,7 @@ class _ProjectRequirementsScreenState
                           workshopId: workshopId,
                           units: units,
                           savedCutPlan: savedCutPlan,
+                          availableRemnants: availableRemnants,
                           allLines: allLines,
                           catalogItems: catalogItems,
                         )
@@ -572,17 +619,16 @@ class _ProjectRequirementsScreenState
                         ),
                 ),
 
-                // 5. Post-Requirements 3-Option Action Bar (Spec §5.5)
-                if (toBuyLinesCount > 0)
-                  _buildPostRequirementsActionBar(
-                    context: context,
-                    workshopId: workshopId,
-                    workshops: workshops,
-                    project: project,
-                    activeLines: activeLines,
-                    toBuyCount: toBuyLinesCount,
-                    isDark: isDark,
-                  ),
+                // 5. Post-Requirements Action Bar & Next Step (3 · السلة والطلب)
+                _buildPostRequirementsActionBar(
+                  context: context,
+                  workshopId: workshopId,
+                  workshops: workshops,
+                  project: project,
+                  activeLines: activeLines,
+                  toBuyCount: toBuyLinesCount,
+                  isDark: isDark,
+                ),
               ],
             );
           },
@@ -608,6 +654,7 @@ class _ProjectRequirementsScreenState
     required String workshopId,
     required List<ProjectUnit> units,
     required SavedCutPlan? savedCutPlan,
+    required List<RemnantDoc> availableRemnants,
     required List<RequirementLine> allLines,
     required List<CatalogItem> catalogItems,
   }) {
@@ -648,7 +695,9 @@ class _ProjectRequirementsScreenState
                       workshopId: workshopId,
                       units: units,
                       savedCutPlan: savedCutPlan,
+                      availableRemnants: availableRemnants,
                       existingLines: allLines,
+                      forceLiveCut: true,
                     ),
                   ),
                 OutlinedButton.icon(
@@ -2117,10 +2166,73 @@ class _ProjectRequirementsScreenState
                 ),
               ],
             ),
+            const SizedBox(height: 10),
+            ElevatedButton.icon(
+              icon: _isNavigatingToCart
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.black,
+                      ),
+                    )
+                  : const Icon(Icons.shopping_cart_checkout_rounded),
+              label: const Text('التالي: الانتقال إلى 3 · السلة والطلب'),
+              onPressed: _isNavigatingToCart
+                  ? null
+                  : () => _syncToCartAndNavigate(
+                        context: context,
+                        workshopId: workshopId,
+                        project: project,
+                        toBuyLines: toBuyLines,
+                      ),
+            ),
           ],
         ),
       ),
     );
+  }
+
+  Future<void> _syncToCartAndNavigate({
+    required BuildContext context,
+    required String workshopId,
+    required Project? project,
+    required List<RequirementLine> toBuyLines,
+  }) async {
+    setState(() => _isNavigatingToCart = true);
+    try {
+      if (toBuyLines.isNotEmpty && workshopId.isNotEmpty) {
+        final cartItems = toBuyLines.map((line) {
+          return CartItem(
+            id: '',
+            itemId: line.itemId ?? line.engineItemCode,
+            engineItemCode: line.engineItemCode,
+            nameArabic: line.nameArabic,
+            category: line.category,
+            unit: line.unit,
+            qty: line.toBuyQty,
+            sourceProjectId: widget.projectId,
+            sourceProjectName: project?.name ?? '',
+            note: line.note,
+            updatedAt: DateTime.now(),
+          );
+        }).toList();
+        await ref.read(cartRepositoryProvider).upsertProjectCartItems(
+              workshopId: workshopId,
+              items: cartItems,
+            );
+      }
+      if (context.mounted) {
+        context.push(
+          '/dashboard/owner/cart?projectId=${widget.projectId}&workshopId=$workshopId',
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isNavigatingToCart = false);
+      }
+    }
   }
 
   Future<void> _exportRequirementsPdf({

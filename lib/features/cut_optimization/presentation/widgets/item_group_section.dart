@@ -23,10 +23,16 @@ class _ItemGroupSectionState extends State<ItemGroupSection> {
 
   @override
   Widget build(BuildContext context) {
-    final nameArabic = widget.barPlans.isNotEmpty &&
+    final baseName = widget.barPlans.isNotEmpty &&
             widget.barPlans.first.cuts.isNotEmpty
         ? widget.barPlans.first.cuts.first.nameArabic
         : widget.itemCode;
+    final colorLabel = widget.barPlans.isNotEmpty &&
+            widget.barPlans.first.color.trim().isNotEmpty
+        ? profileColorLabelAr(widget.barPlans.first.color)
+        : '';
+    final nameArabic =
+        colorLabel.isNotEmpty ? '$baseName — $colorLabel' : baseName;
 
     final totalCuts = widget.barPlans
         .fold<int>(0, (sum, b) => sum + b.cuts.length);

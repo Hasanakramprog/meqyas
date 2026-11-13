@@ -23,6 +23,14 @@ class ProjectUnit {
   final double glassThicknessMm;
   final bool hasCorners;
   final bool hasGasket;
+  final String brushColor; // 'أسود', 'بني', 'رمادي', 'أبيض'
+  final String glassRollerType; // '', 'roller_2000_single', 'roller_2000_double'
+  final int glassRollerCount; // even count, e.g. 2, 4, 6
+  final String frameGasketType; // 'frame_gasket', 'none'
+  final String screenCornerType; // 'screen_corner', 'none'
+  final int puttyQtyPerUnit;
+  final String meshType; // 'fiber' or 'aluminum'
+  final int meshRollWidthCm; // 0 = auto least-waste
   final List<String> ruleVersionIdsUsed;
 
   /// Sparse map of unit-level customized properties ("تخصيص لعنصر محدد").
@@ -62,6 +70,14 @@ class ProjectUnit {
     this.glassThicknessMm = 6.0,
     this.hasCorners = true,
     this.hasGasket = false,
+    this.brushColor = 'أسود',
+    this.glassRollerType = '',
+    this.glassRollerCount = 4,
+    this.frameGasketType = 'frame_gasket',
+    this.screenCornerType = 'screen_corner',
+    this.puttyQtyPerUnit = 0,
+    this.meshType = 'fiber',
+    this.meshRollWidthCm = 0,
     this.ruleVersionIdsUsed = const [],
     this.overrides = const {},
     required this.createdAt,
@@ -149,6 +165,14 @@ class ProjectUnit {
       glassThicknessMm: effectiveGlassThicknessMm(defaults),
       hasCorners: hasCorners,
       hasGasket: effectiveHasGasket(defaults),
+      brushColor: brushColor,
+      glassRollerType: glassRollerType,
+      glassRollerCount: glassRollerCount,
+      frameGasketType: frameGasketType,
+      screenCornerType: screenCornerType,
+      puttyQtyPerUnit: puttyQtyPerUnit,
+      meshType: meshType,
+      meshRollWidthCm: meshRollWidthCm,
       customOptions: {'color': resolvedColor},
     );
   }
@@ -261,6 +285,14 @@ class ProjectUnit {
       'glassThicknessMm': glassThicknessMm,
       'hasCorners': hasCorners,
       'hasGasket': hasGasket,
+      'brushColor': brushColor,
+      'glassRollerType': glassRollerType,
+      'glassRollerCount': glassRollerCount,
+      'frameGasketType': frameGasketType,
+      'screenCornerType': screenCornerType,
+      'puttyQtyPerUnit': puttyQtyPerUnit,
+      'meshType': meshType,
+      'meshRollWidthCm': meshRollWidthCm,
       'ruleVersionIdsUsed': ruleVersionIdsUsed,
       'overrides': overrides,
       'createdAt': Timestamp.fromDate(createdAt),
@@ -293,6 +325,14 @@ class ProjectUnit {
       glassThicknessMm: (data['glassThicknessMm'] as num?)?.toDouble() ?? 6.0,
       hasCorners: data['hasCorners'] as bool? ?? true,
       hasGasket: data['hasGasket'] as bool? ?? false,
+      brushColor: data['brushColor'] as String? ?? 'أسود',
+      glassRollerType: data['glassRollerType'] as String? ?? '',
+      glassRollerCount: (data['glassRollerCount'] as num?)?.toInt() ?? 4,
+      frameGasketType: data['frameGasketType'] as String? ?? 'frame_gasket',
+      screenCornerType: data['screenCornerType'] as String? ?? 'screen_corner',
+      puttyQtyPerUnit: (data['puttyQtyPerUnit'] as num?)?.toInt() ?? 0,
+      meshType: data['meshType'] as String? ?? 'fiber',
+      meshRollWidthCm: (data['meshRollWidthCm'] as num?)?.toInt() ?? 0,
       ruleVersionIdsUsed: (data['ruleVersionIdsUsed'] as List<dynamic>?)
               ?.map((e) => e.toString())
               .toList() ??
@@ -332,6 +372,14 @@ class ProjectUnit {
     double? glassThicknessMm,
     bool? hasCorners,
     bool? hasGasket,
+    String? brushColor,
+    String? glassRollerType,
+    int? glassRollerCount,
+    String? frameGasketType,
+    String? screenCornerType,
+    int? puttyQtyPerUnit,
+    String? meshType,
+    int? meshRollWidthCm,
     List<String>? ruleVersionIdsUsed,
     Map<String, dynamic>? overrides,
     DateTime? createdAt,
@@ -358,6 +406,14 @@ class ProjectUnit {
       glassThicknessMm: glassThicknessMm ?? this.glassThicknessMm,
       hasCorners: hasCorners ?? this.hasCorners,
       hasGasket: hasGasket ?? this.hasGasket,
+      brushColor: brushColor ?? this.brushColor,
+      glassRollerType: glassRollerType ?? this.glassRollerType,
+      glassRollerCount: glassRollerCount ?? this.glassRollerCount,
+      frameGasketType: frameGasketType ?? this.frameGasketType,
+      screenCornerType: screenCornerType ?? this.screenCornerType,
+      puttyQtyPerUnit: puttyQtyPerUnit ?? this.puttyQtyPerUnit,
+      meshType: meshType ?? this.meshType,
+      meshRollWidthCm: meshRollWidthCm ?? this.meshRollWidthCm,
       ruleVersionIdsUsed: ruleVersionIdsUsed ?? this.ruleVersionIdsUsed,
       overrides: overrides ?? this.overrides,
       createdAt: createdAt ?? this.createdAt,

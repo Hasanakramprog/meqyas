@@ -254,7 +254,8 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             name: 'owner_cart',
             builder: (context, state) {
               final wid = state.uri.queryParameters['workshopId'];
-              return CartScreen(initialWorkshopId: wid);
+              final pid = state.uri.queryParameters['projectId'];
+              return CartScreen(initialWorkshopId: wid, projectId: pid);
             },
           ),
           GoRoute(

@@ -5,6 +5,8 @@ import 'package:go_router/go_router.dart';
 import '../../../app/theme/app_colors.dart';
 import '../../../core/widgets/offline_sync_banner.dart';
 import '../../auth/presentation/controllers/auth_controller.dart';
+import '../../cut_optimization/data/cut_plan_repository.dart';
+import '../../cut_optimization/presentation/screens/remnants_screen.dart';
 import '../../orders/data/orders_repository.dart';
 import '../../orders/domain/order_model.dart';
 import '../../projects/data/projects_repository.dart';
@@ -50,8 +52,12 @@ class _OwnerDashboardScreenState extends ConsumerState<OwnerDashboardScreen> {
 
     final projectsAsync = ref.watch(workshopProjectsProvider(activeWorkshopId));
     final ordersAsync = ref.watch(workshopOrdersProvider(activeWorkshopId));
+    final remnantsAsync = ref.watch(remnantsProvider(activeWorkshopId));
     final projectsList = projectsAsync.value ?? [];
     final ordersList = ordersAsync.value ?? [];
+    final availableRemnantsCount = (remnantsAsync.value ?? const [])
+        .where((r) => r.isAvailable)
+        .length;
 
     final totalUnits = projectsList.fold<int>(0, (sum, p) => sum + p.unitCount);
     final activeClients = projectsList
@@ -90,6 +96,7 @@ class _OwnerDashboardScreenState extends ConsumerState<OwnerDashboardScreen> {
             projectsCount: projectsList.length,
             ordersCount: ordersList.length,
             quotedOrdersCount: quotedOrdersCount,
+            availableRemnantsCount: availableRemnantsCount,
           ),
 
           // Main Workspace View (Switches cleanly in-place by tab)
@@ -125,6 +132,12 @@ class _OwnerDashboardScreenState extends ConsumerState<OwnerDashboardScreen> {
                       activeWorkshopId: activeWorkshopId,
                       workshops: workshops,
                       isDark: isDark,
+                    ),
+
+                    // Tab 3: مخزن الفضلات
+                    RemnantsScreen(
+                      workshopId: activeWorkshopId,
+                      embedded: true,
                     ),
                   ],
                 ),
@@ -518,6 +531,7 @@ class _OwnerDashboardScreenState extends ConsumerState<OwnerDashboardScreen> {
     required int projectsCount,
     required int ordersCount,
     required int quotedOrdersCount,
+    required int availableRemnantsCount,
   }) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -565,6 +579,13 @@ class _OwnerDashboardScreenState extends ConsumerState<OwnerDashboardScreen> {
                       index: 2,
                       icon: Icons.handyman_outlined,
                       label: 'أدوات وإعدادات الورشة',
+                      isDark: isDark,
+                    ),
+                    const SizedBox(width: 8),
+                    _buildWorkspaceTabButton(
+                      index: 3,
+                      icon: Icons.layers_rounded,
+                      label: 'مخزن الفضلات ($availableRemnantsCount)',
                       isDark: isDark,
                     ),
                   ],

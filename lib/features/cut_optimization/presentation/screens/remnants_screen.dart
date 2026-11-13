@@ -10,8 +10,13 @@ import '../../data/cut_plan_repository.dart';
 
 class RemnantsScreen extends ConsumerStatefulWidget {
   final String workshopId;
+  final bool embedded;
 
-  const RemnantsScreen({super.key, required this.workshopId});
+  const RemnantsScreen({
+    super.key,
+    required this.workshopId,
+    this.embedded = false,
+  });
 
   @override
   ConsumerState<RemnantsScreen> createState() => _RemnantsScreenState();
@@ -34,60 +39,12 @@ class _RemnantsScreenState extends ConsumerState<RemnantsScreen> {
     final isDark = theme.brightness == Brightness.dark;
     final remnantsAsync = ref.watch(remnantsProvider(widget.workshopId));
 
-    return Scaffold(
-      backgroundColor:
-          isDark ? AppColors.darkBackground : AppColors.lightBackground,
-      appBar: AppBar(
-        title: const Text('مخزن الفضلات'),
-        centerTitle: false,
-        backgroundColor:
-            isDark ? AppColors.darkSurface : AppColors.lightSurface,
-        elevation: 0,
-        actions: [
-          IconButton(
-            icon: const Icon(
-              Icons.add_circle_outline_rounded,
-              color: AppColors.amberPrimary,
-            ),
-            tooltip: 'إضافة فضلة أو قضيب يدوياً',
-            onPressed: () => _showAddManualRemnantDialog(context),
-          ),
-          IconButton(
-            icon: const Icon(
-              Icons.qr_code_scanner_rounded,
-              color: AppColors.amberPrimary,
-            ),
-            tooltip: 'ماسح قطع الألمنيوم QR',
-            onPressed: () => context.push('/scanner'),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-            child: FilterChip(
-              label: const Text('المتاح فقط'),
-              selected: _showAvailableOnly,
-              onSelected: (v) => setState(() => _showAvailableOnly = v),
-              selectedColor: AppColors.amberPrimary.withValues(alpha: 0.2),
-              checkmarkColor: AppColors.amberPrimary,
-            ),
-          ),
-        ],
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        backgroundColor: AppColors.amberPrimary,
-        foregroundColor: Colors.black,
-        icon: const Icon(Icons.add_rounded),
-        label: const Text(
-          'إضافة فضلة / مخزون يدوياً',
-          style: TextStyle(fontWeight: FontWeight.bold),
-        ),
-        onPressed: () => _showAddManualRemnantDialog(context),
-      ),
-      body: remnantsAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text('خطأ في تحميل الفضلات: $e')),
-        data: (allRemnants) {
-          final filtered = allRemnants.where((r) {
-            if (_showAvailableOnly && !r.isAvailable) return false;
+    final content = remnantsAsync.when(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (e, _) => Center(child: Text('خطأ في تحميل الفضلات: $e')),
+      data: (allRemnants) {
+        final filtered = allRemnants.where((r) {
+          if (_showAvailableOnly && !r.isAvailable) return false;
             if (_filterItemCode != null && r.itemCode != _filterItemCode) {
               return false;
             }
@@ -227,7 +184,100 @@ class _RemnantsScreenState extends ConsumerState<RemnantsScreen> {
             ],
           );
         },
+      );
+
+    return Scaffold(
+      backgroundColor:
+          isDark ? AppColors.darkBackground : AppColors.lightBackground,
+      appBar: widget.embedded
+          ? null
+          : AppBar(
+              title: const Text('مخزن الفضلات'),
+              centerTitle: false,
+              backgroundColor:
+                  isDark ? AppColors.darkSurface : AppColors.lightSurface,
+              elevation: 0,
+              actions: [
+                IconButton(
+                  icon: const Icon(
+                    Icons.add_circle_outline_rounded,
+                    color: AppColors.amberPrimary,
+                  ),
+                  tooltip: 'إضافة فضلة أو قضيب يدوياً',
+                  onPressed: () => _showAddManualRemnantDialog(context),
+                ),
+                IconButton(
+                  icon: const Icon(
+                    Icons.qr_code_scanner_rounded,
+                    color: AppColors.amberPrimary,
+                  ),
+                  tooltip: 'ماسح قطع الألمنيوم QR',
+                  onPressed: () => context.push('/scanner'),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 8,
+                  ),
+                  child: FilterChip(
+                    label: const Text('المتاح فقط'),
+                    selected: _showAvailableOnly,
+                    onSelected: (v) => setState(() => _showAvailableOnly = v),
+                    selectedColor: AppColors.amberPrimary.withValues(alpha: 0.2),
+                    checkmarkColor: AppColors.amberPrimary,
+                  ),
+                ),
+              ],
+            ),
+      floatingActionButton: FloatingActionButton.extended(
+        backgroundColor: AppColors.amberPrimary,
+        foregroundColor: Colors.black,
+        icon: const Icon(Icons.add_rounded),
+        label: const Text(
+          'إضافة فضلة / مخزون يدوياً',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+        onPressed: () => _showAddManualRemnantDialog(context),
       ),
+      body: widget.embedded
+          ? Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                  child: Row(
+                    children: [
+                      const Text(
+                        'مخزن الفضلات',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const Spacer(),
+                      IconButton(
+                        icon: const Icon(
+                          Icons.qr_code_scanner_rounded,
+                          color: AppColors.amberPrimary,
+                        ),
+                        tooltip: 'ماسح قطع الألمنيوم QR',
+                        onPressed: () => context.push('/scanner'),
+                      ),
+                      FilterChip(
+                        label: const Text('المتاح فقط'),
+                        selected: _showAvailableOnly,
+                        onSelected: (v) =>
+                            setState(() => _showAvailableOnly = v),
+                        selectedColor:
+                            AppColors.amberPrimary.withValues(alpha: 0.2),
+                        checkmarkColor: AppColors.amberPrimary,
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(child: content),
+              ],
+            )
+          : content,
     );
   }
 

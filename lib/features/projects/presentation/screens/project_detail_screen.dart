@@ -15,6 +15,7 @@ import '../widgets/project_deductions_sheet.dart';
 
 import '../widgets/project_general_properties_card.dart';
 import '../widgets/project_stepper_bar.dart';
+import '../widgets/unit_accessories_mesh_section.dart';
 
 final projectDetailProvider = StreamProvider.autoDispose
     .family<Project?, ({String workshopId, String projectId})>((ref, arg) {
@@ -250,11 +251,11 @@ class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> {
             ),
           const SizedBox(height: 8),
           ElevatedButton.icon(
-            icon: const Icon(Icons.cut_rounded),
-            label: const Text('التالي: الانتقال إلى 2 · القصّ'),
+            icon: const Icon(Icons.fact_check_rounded),
+            label: const Text('التالي: الانتقال إلى 2 · مراجعة البضاعة'),
             onPressed: () {
               context.push(
-                '/dashboard/owner/cut-plan?projectId=${widget.projectId}&workshopId=$workshopId',
+                '/dashboard/owner/projects/${widget.projectId}/requirements?workshopId=$workshopId',
               );
             },
           ),
@@ -850,6 +851,12 @@ class _ProjectUnitInlineCardState
                     ),
                   ),
                 ],
+              ),
+              const SizedBox(height: 12),
+              UnitAccessoriesAndMeshSection(
+                unit: u,
+                effectiveGlazingMode: effGlazing,
+                onUnitChanged: _saveUpdatedUnit,
               ),
               const SizedBox(height: 10),
               Align(

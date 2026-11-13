@@ -262,43 +262,83 @@ class CalculatorEngine {
 
       // Rollers
       AccessoryItem(
-        code: 'glass_rollers',
-        nameArabic: 'عجلات درف الزجاج',
-        quantity: spec.sashCount * 2, // must be even
-        unit: 'pair',
+        code: spec.glassRollerType.isNotEmpty
+            ? 'glass_${spec.glassRollerType}'
+            : 'glass_rollers',
+        nameArabic: _glassRollerArabic(spec),
+        quantity: spec.glassRollerCount > 0
+            ? (spec.glassRollerCount.isEven
+                ? spec.glassRollerCount
+                : spec.glassRollerCount + 1)
+            : spec.sashCount * 2, // must be even
+        unit: 'piece',
       ),
       if (spec.hasScreen)
         AccessoryItem(
           code: 'screen_rollers_${spec.rollerType}',
-          nameArabic: 'عجلات درفة المنخل (${spec.rollerType})',
-          quantity: 2,
-          unit: 'pair',
+          nameArabic: _screenRollerArabic(spec.rollerType),
+          quantity: 2 * spec.screenCount,
+          unit: 'piece',
         ),
     ];
 
-    if (spec.hasCorners) {
+    if (spec.hasCorners && spec.screenCornerType != 'none') {
       accessories.add(
         const AccessoryItem(
           code: 'corners',
-          nameArabic: 'زوايا تجميع',
+          nameArabic: 'زاوية تجميع المنخل',
           quantity: 4,
           unit: 'piece',
         ),
       );
     }
 
-    if (spec.hasGasket) {
+    if (spec.frameGasketType != 'none') {
       accessories.add(
         const AccessoryItem(
           code: 'gasket',
-          nameArabic: 'جوان إحكام عازل',
+          nameArabic: 'جوان تجميع الكادر',
           quantity: 4,
+          unit: 'piece',
+        ),
+      );
+    }
+
+    if (spec.puttyQtyPerUnit > 0) {
+      accessories.add(
+        AccessoryItem(
+          code: 'putty',
+          nameArabic: 'معجونة',
+          quantity: spec.puttyQtyPerUnit,
           unit: 'piece',
         ),
       );
     }
 
     return accessories;
+  }
+
+  String _glassRollerArabic(UnitSpecification spec) {
+    final resolved = spec.glassRollerType.isNotEmpty
+        ? spec.glassRollerType
+        : (spec.glazingMode == 'double'
+            ? 'roller_2000_double'
+            : 'roller_2000_single');
+    return resolved == 'roller_2000_double'
+        ? 'دولاب 2000 دبل'
+        : 'دولاب 2000 مفرد';
+  }
+
+  String _screenRollerArabic(String rollerType) {
+    switch (rollerType) {
+      case 'modified_2000':
+        return 'دولاب 2000 معدل (حركة المنخل)';
+      case 'milled':
+        return 'دولاب تفريز (حركة المنخل)';
+      case 'slider':
+      default:
+        return 'زحّافة (حركة المنخل)';
+    }
   }
 
   String _arabicNameForItem(String itemCode) {

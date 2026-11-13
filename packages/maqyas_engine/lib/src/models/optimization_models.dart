@@ -1,3 +1,65 @@
+/// Normalizes Arabic/English aluminum & accessory color names to a canonical key
+/// so remnants, cut pieces, and requirements match reliably across languages.
+String normalizeProfileColor(String raw) {
+  final c = raw.trim().toLowerCase();
+  if (c.isEmpty) return 'white';
+  switch (c) {
+    case 'white':
+    case 'أبيض':
+    case 'ابيض':
+      return 'white';
+    case 'black':
+    case 'أسود':
+    case 'اسود':
+    case 'أسود مطفي':
+    case 'اسود مطفي':
+      return 'black';
+    case 'champagne':
+    case 'شامبين':
+      return 'champagne';
+    case 'bronze':
+    case 'برونز':
+      return 'bronze';
+    case 'grey':
+    case 'gray':
+    case 'رمادي':
+    case 'رمادي (أنتراسيت)':
+    case 'أنتراسيت':
+    case 'انتراسيت':
+      return 'grey';
+    case 'wood':
+    case 'خشبي':
+      return 'wood';
+    case 'beige':
+    case 'بيج':
+      return 'beige';
+    default:
+      return c;
+  }
+}
+
+/// Returns the Arabic display label for a canonical or raw profile color.
+String profileColorLabelAr(String raw) {
+  switch (normalizeProfileColor(raw)) {
+    case 'white':
+      return 'أبيض';
+    case 'black':
+      return 'أسود مطفي';
+    case 'champagne':
+      return 'شامبين';
+    case 'bronze':
+      return 'برونز';
+    case 'grey':
+      return 'رمادي (أنتراسيت)';
+    case 'wood':
+      return 'خشبي';
+    case 'beige':
+      return 'بيج';
+    default:
+      return raw.trim();
+  }
+}
+
 /// Represents a leftover aluminum piece available on the workshop shelf.
 /// Pure Dart — no Firebase imports. The repository layer maps Firestore docs to this.
 class RemnantStock {

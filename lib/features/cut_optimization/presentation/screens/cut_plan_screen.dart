@@ -1,20 +1,14 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart' hide TextDirection;
 import 'package:maqyas_engine/maqyas_engine.dart';
-import 'package:printing/printing.dart';
 import '../../../../app/theme/app_colors.dart';
 import '../../../auth/presentation/controllers/auth_controller.dart';
 import '../../../projects/domain/models/project.dart';
 import '../../../projects/domain/models/project_unit.dart';
-import '../../../projects/data/projects_repository.dart';
 import '../../../projects/presentation/screens/project_detail_screen.dart';
 import '../../../projects/presentation/widgets/project_stepper_bar.dart';
-import '../../../reports/data/label_generator.dart';
-import '../../../reports/data/pdf_generator.dart';
 import '../../../rules/data/rules_repository.dart';
 import '../../data/cut_plan_repository.dart';
 import '../widgets/cut_summary_card.dart';
@@ -37,11 +31,10 @@ class CutPlanScreen extends ConsumerStatefulWidget {
 
 class _CutPlanScreenState extends ConsumerState<CutPlanScreen> {
   bool _isSaving = false;
-  bool _isExportingPdf = false;
-  bool _isExportingLabels = false;
   OptimizationResult? _result;
   bool _hasUnsavedChanges = false;
   DateTime? _savedAt;
+  String? _lastUnitsSignature;
 
   @override
   Widget build(BuildContext context) {
@@ -73,48 +66,6 @@ class _CutPlanScreenState extends ConsumerState<CutPlanScreen> {
           centerTitle: false,
           backgroundColor: isDark ? AppColors.darkSurface : AppColors.lightSurface,
           elevation: 0,
-          actions: [
-            IconButton(
-              icon: _isExportingPdf
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.amberPrimary))
-                  : const Icon(Icons.picture_as_pdf_rounded, color: AppColors.amberPrimary),
-              tooltip: 'تصدير جدول القص PDF',
-              onPressed: (_result == null || _isExportingPdf) ? null : _exportPdf,
-            ),
-            IconButton(
-              icon: _isExportingLabels
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.warning))
-                  : const Icon(Icons.qr_code_2_rounded, color: AppColors.warning),
-              tooltip: 'طباعة ملصقات QR للقطع',
-              onPressed: (_result == null || _isExportingLabels) ? null : _exportLabels,
-            ),
-            IconButton(
-              icon: const Icon(Icons.qr_code_scanner_rounded, color: AppColors.amberPrimary),
-              tooltip: 'ماسح قطع الألمنيوم QR',
-              onPressed: () => context.push('/scanner'),
-            ),
-            IconButton(
-              icon: const Icon(Icons.fact_check_rounded, color: AppColors.success),
-              tooltip: 'احتياجات المشروع من المواد',
-              onPressed: () => _openProjectRequirements(
-                context,
-                effectiveWorkshopId,
-              ),
-            ),
-            IconButton(
-              icon: const Icon(Icons.layers_rounded),
-              tooltip: 'مخزن الفضلات',
-              onPressed: () => context.push(
-                '/dashboard/owner/remnants?workshopId=${widget.workshopId}',
-              ),
-            ),
-          ],
         ),
         body: unitsAsync.when(
           loading: () => const Center(child: CircularProgressIndicator()),
@@ -131,22 +82,11 @@ class _CutPlanScreenState extends ConsumerState<CutPlanScreen> {
             final savedPlan = savedCutPlanAsync.value;
             final allRemnants = allRemnantsAsync.value ?? [];
 
-            // A project can consume:
-            // 1. Available shelf remnants from other projects
-            // 2. PLUS remnants that were previously consumed by this project's own saved plan
-            //    (since recalculating supersedes that plan and re-evaluates its inputs)
-            final availableRemnants = allRemnants.where((r) {
-              if (r.sourceProjectId == widget.projectId) return false;
-              if (r.isAvailable) return true;
-              if (savedPlan != null) {
-                if (r.usedInPlanId == savedPlan.id) return true;
-                if (savedPlan.result.consumedRemnantIds.contains(r.id) &&
-                    (r.usedInPlanId == null || r.usedInPlanId == savedPlan.id)) {
-                  return true;
-                }
-              }
-              return false;
-            }).toList();
+            final availableRemnants = filterAvailableRemnantsForProject(
+              allRemnants: allRemnants,
+              projectId: widget.projectId,
+              savedPlan: savedPlan,
+            );
 
             // Build cut pieces from all units
             final allPieces = _buildPieces(
@@ -165,17 +105,48 @@ class _CutPlanScreenState extends ConsumerState<CutPlanScreen> {
             final hasUnitsChangedSinceSave = savedPlan != null &&
                 (currentTotalCuts != savedCutsCount || (currentTotalLength - savedTotalLength).abs() > 0.5);
 
-            if (_result == null) {
-              if (savedPlan != null) {
+            final colorSig = (allPieces
+                    .map((p) => '${p.itemCode}:${p.color ?? 'white'}')
+                    .toSet()
+                    .toList()
+                  ..sort())
+                .join(',');
+            final remSig = remnantsSignature(availableRemnants);
+            final liveSig =
+                '${currentTotalCuts}_${currentTotalLength.toStringAsFixed(2)}_${colorSig}_${remSig}_${optimizer.barLengthCm}_${optimizer.kerfPerCutCm}';
+            if (_result == null || _lastUnitsSignature != liveSig) {
+              _lastUnitsSignature = liveSig;
+              final liveOpt = optimizer.optimize(
+                pieces: allPieces,
+                availableRemnants:
+                    availableRemnants.map((r) => r.toRemnantStock()).toList(),
+              );
+              final savedRemnantsSet =
+                  savedPlan?.result.consumedRemnantIds.toSet() ?? const <String>{};
+              final liveRemnantsSet = liveOpt.consumedRemnantIds.toSet();
+              final savedBarKeys = (savedPlan?.result.barPlans ?? const [])
+                  .map((b) => '${b.itemCode}:${normalizeProfileColor(b.color)}')
+                  .toSet();
+              final liveBarKeys = liveOpt.barPlans
+                  .map((b) => '${b.itemCode}:${normalizeProfileColor(b.color)}')
+                  .toSet();
+              final remnantsChangedSinceSave = savedPlan != null &&
+                  (liveOpt.summary.totalBarsNeeded !=
+                          savedPlan.result.summary.totalBarsNeeded ||
+                      savedRemnantsSet.length != liveRemnantsSet.length ||
+                      !savedRemnantsSet.containsAll(liveRemnantsSet) ||
+                      savedBarKeys.length != liveBarKeys.length ||
+                      !savedBarKeys.containsAll(liveBarKeys));
+              if (savedPlan != null &&
+                  !hasUnitsChangedSinceSave &&
+                  !remnantsChangedSinceSave) {
                 _result = savedPlan.result;
                 _savedAt = savedPlan.generatedAt;
                 _hasUnsavedChanges = false;
               } else {
-                _result = optimizer.optimize(
-                  pieces: allPieces,
-                  availableRemnants: availableRemnants.map((r) => r.toRemnantStock()).toList(),
-                );
-                _hasUnsavedChanges = true;
+                _result = liveOpt;
+                _savedAt = savedPlan?.generatedAt;
+                _hasUnsavedChanges = savedPlan != null;
               }
             }
 
@@ -187,73 +158,10 @@ class _CutPlanScreenState extends ConsumerState<CutPlanScreen> {
                   ProjectStepperBar(
                     projectId: widget.projectId,
                     workshopId: effectiveWorkshopId,
-                    activeStep: 2,
+                    activeStep: 4,
                   ),
                 // ── Status Banner for Saved Plan ──────────────────────
-                if (_savedAt != null && !_hasUnsavedChanges && hasUnitsChangedSinceSave)
-                  Container(
-                    margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                    decoration: BoxDecoration(
-                      color: AppColors.warning.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: AppColors.warning.withValues(alpha: 0.5)),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            const Icon(Icons.warning_amber_rounded, color: AppColors.warning, size: 20),
-                            const SizedBox(width: 8),
-                            const Expanded(
-                              child: Text(
-                                'تم تعديل وحدات المشروع بعد حفظ هذه الخطة!',
-                                style: TextStyle(
-                                  color: AppColors.warning,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 13,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          'الخطة المحفوظة أدناه تحتوي على ($savedCutsCount قطعة) بينما المشروع حالياً يحتوي على ($currentTotalCuts قطعة). الخطة الحالية لا تشمل التعديلات الأخيرة.',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: isDark ? AppColors.slate300 : AppColors.slate700,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Align(
-                          alignment: Alignment.centerLeft,
-                          child: ElevatedButton.icon(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: AppColors.warning,
-                              foregroundColor: Colors.black,
-                              visualDensity: VisualDensity.compact,
-                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                            ),
-                            icon: const Icon(Icons.refresh_rounded, size: 16),
-                            label: const Text('إعادة حساب الخطة لتشمل الإضافات', style: TextStyle(fontSize: 12)),
-                            onPressed: () => _confirmRecalculate(
-                              context: context,
-                              project: projectAsync.value,
-                              units: unitsAsync.value ?? [],
-                              savedPlan: savedCutPlanAsync.value!,
-                              optimizer: optimizer,
-                              allPieces: allPieces,
-                              availableRemnants: availableRemnants,
-                              effectiveWorkshopId: effectiveWorkshopId,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  )
-                else if (_savedAt != null && !_hasUnsavedChanges)
+                if (_savedAt != null && !_hasUnsavedChanges)
                   Container(
                     margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
                     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -276,47 +184,6 @@ class _CutPlanScreenState extends ConsumerState<CutPlanScreen> {
                             ),
                           ),
                         ),
-                      ],
-                    ),
-                  )
-                else if (_savedAt != null && _hasUnsavedChanges)
-                  Container(
-                    margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: AppColors.warning.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: AppColors.warning.withValues(alpha: 0.4)),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.info_outline_rounded, color: AppColors.warning, size: 20),
-                        const SizedBox(width: 8),
-                        const Expanded(
-                          child: Text(
-                            'إعادة حساب تجريبية (لم تُحفظ بعد)',
-                            style: TextStyle(
-                              color: AppColors.warning,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ),
-                        if (savedPlan != null)
-                          TextButton(
-                            style: TextButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(horizontal: 8),
-                              visualDensity: VisualDensity.compact,
-                            ),
-                            onPressed: () {
-                              setState(() {
-                                _result = savedPlan.result;
-                                _savedAt = savedPlan.generatedAt;
-                                _hasUnsavedChanges = false;
-                              });
-                            },
-                            child: const Text('تراجع للسابقة', style: TextStyle(fontSize: 12)),
-                          ),
                       ],
                     ),
                   ),
@@ -370,6 +237,7 @@ class _CutPlanScreenState extends ConsumerState<CutPlanScreen> {
       );
       final engine = CalculatorEngine(rules: unitRules);
       final res = engine.calculate(u.toEngineSpec(defaults));
+      final unitColor = normalizeProfileColor(u.effectiveColor(defaults));
       for (var copy = 1; copy <= u.quantity; copy++) {
         final tag = u.quantity > 1 ? '$label (#$copy)' : label;
         for (final p in res.pieces) {
@@ -382,6 +250,7 @@ class _CutPlanScreenState extends ConsumerState<CutPlanScreen> {
             cutAngleRight: p.cutAngleRight,
             profileType: p.profileType,
             unitTag: tag,
+            color: unitColor,
           ));
         }
       }
@@ -392,11 +261,12 @@ class _CutPlanScreenState extends ConsumerState<CutPlanScreen> {
   List<Widget> _buildItemGroups(OptimizationResult result, bool isDark) {
     final grouped = <String, List<BarCuttingPlan>>{};
     for (final bar in result.barPlans) {
-      grouped.putIfAbsent(bar.itemCode, () => []).add(bar);
+      final key = '${bar.itemCode}::${normalizeProfileColor(bar.color)}';
+      grouped.putIfAbsent(key, () => []).add(bar);
     }
     return grouped.entries
         .map((e) => ItemGroupSection(
-              itemCode: e.key,
+              itemCode: e.value.first.itemCode,
               barPlans: e.value,
               isDark: isDark,
             ))
@@ -421,8 +291,9 @@ class _CutPlanScreenState extends ConsumerState<CutPlanScreen> {
   }
 
   Widget _buildActionBar(BuildContext context, bool isDark) {
+    final alreadySaved = !_hasUnsavedChanges && _savedAt != null;
     return Container(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
       decoration: BoxDecoration(
         color: isDark ? AppColors.darkSurface : Colors.white,
         boxShadow: [
@@ -437,157 +308,65 @@ class _CutPlanScreenState extends ConsumerState<CutPlanScreen> {
         child: Row(
           children: [
             Expanded(
-              flex: 3,
               child: ElevatedButton.icon(
                 icon: _isSaving
                     ? const SizedBox(
                         width: 16,
                         height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
                     : Icon(
-                        (!_hasUnsavedChanges && _savedAt != null)
+                        alreadySaved
                             ? Icons.check_circle_rounded
-                            : Icons.save_rounded,
+                            : Icons.content_cut_rounded,
                         size: 18,
                       ),
-                label: Text(
-                  (!_hasUnsavedChanges && _savedAt != null)
-                      ? 'الخطة معتمدة ومحفوظة ✅'
-                      : (_savedAt != null ? 'تحديث وحفظ الخطة 💾' : 'حفظ الخطة 💾'),
+                label: const Text(
+                  'قص',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
                 ),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: (!_hasUnsavedChanges && _savedAt != null)
-                      ? AppColors.success
-                      : AppColors.amberPrimary,
+                  backgroundColor:
+                      alreadySaved ? AppColors.success : AppColors.amberPrimary,
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                 ),
-                onPressed: _isSaving
-                    ? null
-                    : (!_hasUnsavedChanges && _savedAt != null)
-                        ? () {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text('الخطة معتمدة ومحفوظة مسبقاً. لإعادة الحساب من المخزن الحالي اضغط على زر التحديث 🔄 أعلى البطاقة.'),
-                              ),
-                            );
-                          }
-                        : _savePlan,
+                onPressed: _isSaving ? null : _savePlan,
               ),
             ),
-            const SizedBox(width: 8),
-            OutlinedButton.icon(
-              style: OutlinedButton.styleFrom(
-                foregroundColor: AppColors.success,
-                side: const BorderSide(color: AppColors.success),
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            const SizedBox(width: 10),
+            Expanded(
+              child: OutlinedButton.icon(
+                icon: const Icon(Icons.folder_copy_rounded, size: 18),
+                label: const Text(
+                  'الانتقال إلى قائمة المشاريع',
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                ),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.amberPrimary,
+                  side: const BorderSide(color: AppColors.amberPrimary),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 14,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                onPressed: () => context.go('/dashboard/owner'),
               ),
-              icon: const Icon(Icons.fact_check_rounded, size: 18),
-              label: const Text('احتياجات المواد'),
-              onPressed: () {
-                final effectiveWorkshopId = widget.workshopId.isNotEmpty
-                    ? widget.workshopId
-                    : (ref.read(activeWorkshopIdProvider) ?? '');
-                _openProjectRequirements(context, effectiveWorkshopId);
-              },
-            ),
-            const SizedBox(width: 6),
-            IconButton.filledTonal(
-              tooltip: 'تصدير PDF',
-              icon: _isExportingPdf
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2))
-                  : const Icon(Icons.picture_as_pdf_rounded),
-              onPressed: (_result == null || _isExportingPdf) ? null : _exportPdf,
-            ),
-            const SizedBox(width: 4),
-            IconButton.filledTonal(
-              tooltip: 'ملصقات QR',
-              icon: _isExportingLabels
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2))
-                  : const Icon(Icons.qr_code_2_rounded),
-              onPressed: (_result == null || _isExportingLabels) ? null : _exportLabels,
             ),
           ],
         ),
       ),
     );
-  }
-
-  Future<String> _resolveWorkshopName() async {
-    final currentUser = ref.read(currentUserProvider).value;
-    final ownerUid = currentUser?.uid ?? '';
-    final workshops = ref.read(ownerWorkshopsProvider(ownerUid)).value ?? [];
-    for (final w in workshops) {
-      if (w.id == widget.workshopId) return w.name;
-    }
-    return workshops.isNotEmpty ? workshops.first.name : 'ورشة مقياس للألمنيوم';
-  }
-
-  Future<void> _exportPdf() async {
-    if (_result == null) return;
-    final query = (workshopId: widget.workshopId, projectId: widget.projectId);
-    final project = ref.read(projectDetailProvider(query)).value;
-    final projectName = project?.name ?? 'المشروع';
-    final workshopName = await _resolveWorkshopName();
-
-    setState(() => _isExportingPdf = true);
-    try {
-      final pdfBytes = await CutPlanPdfGenerator.generate(
-        workshopName: workshopName,
-        projectName: projectName,
-        result: _result!,
-      );
-
-      await Printing.layoutPdf(
-        name: 'خطة_قص_${projectName.replaceAll(" ", "_")}.pdf',
-        onLayout: (format) async => pdfBytes,
-      );
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('خطأ أثناء تجهيز ملف PDF: $e')),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _isExportingPdf = false);
-    }
-  }
-
-  Future<void> _exportLabels() async {
-    if (_result == null) return;
-    final query = (workshopId: widget.workshopId, projectId: widget.projectId);
-    final project = ref.read(projectDetailProvider(query)).value;
-    final projectName = project?.name ?? 'المشروع';
-
-    setState(() => _isExportingLabels = true);
-    try {
-      final pdfBytes = await QrLabelPdfGenerator.generate(
-        projectName: projectName,
-        projectId: widget.projectId,
-        result: _result!,
-      );
-
-      await Printing.layoutPdf(
-        name: 'ملصقات_${projectName.replaceAll(" ", "_")}.pdf',
-        onLayout: (format) async => pdfBytes,
-      );
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('خطأ أثناء تجهيز ملصقات QR: $e')),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _isExportingLabels = false);
-    }
   }
 
   Future<void> _savePlan() async {
@@ -605,7 +384,8 @@ class _CutPlanScreenState extends ConsumerState<CutPlanScreen> {
     setState(() => _isSaving = true);
     try {
       final repo = ref.read(cutPlanRepositoryProvider);
-      final optimizer = ref.read(cuttingOptimizerProvider(effectiveWorkshopId)).value;
+      final optimizer =
+          ref.read(cuttingOptimizerProvider(effectiveWorkshopId)).value;
       final planId = await repo.saveCutPlan(
         workshopId: effectiveWorkshopId,
         projectId: widget.projectId,
@@ -620,13 +400,12 @@ class _CutPlanScreenState extends ConsumerState<CutPlanScreen> {
           SnackBar(
             content: Text(
               _result!.usedRemnants
-                  ? 'تم حفظ الخطة · ${_result!.consumedRemnantIds.length} فضلة مستخدمة'
-                  : 'تم حفظ خطة القص بنجاح',
+                  ? 'تم اعتماد القص وحفظ الخطة · ${_result!.consumedRemnantIds.length} فضلة مستخدمة'
+                  : 'تم اعتماد القص وحفظ الخطة بنجاح',
             ),
             backgroundColor: AppColors.success,
           ),
         );
-        // Invalidate remnants and saved plan so stock & plan screens refresh
         ref.invalidate(remnantsProvider(effectiveWorkshopId));
         ref.invalidate(availableRemnantsProvider(effectiveWorkshopId));
         ref.invalidate(savedCutPlanProvider(query));
@@ -635,32 +414,6 @@ class _CutPlanScreenState extends ConsumerState<CutPlanScreen> {
           _savedAt = DateTime.now();
         });
         debugPrint('Cut plan saved: $planId');
-
-        // Optional background upload of PDF to Firebase Storage
-        try {
-          final workshopName = await _resolveWorkshopName();
-          final pdfBytes = await CutPlanPdfGenerator.generate(
-            workshopName: workshopName,
-            projectName: project.name,
-            result: _result!,
-          );
-          final storageRef = FirebaseStorage.instance
-              .ref('workshops/${widget.workshopId}/cut-plans/$planId/cut_plan.pdf');
-          await storageRef.putData(
-            pdfBytes,
-            SettableMetadata(contentType: 'application/pdf'),
-          );
-          final url = await storageRef.getDownloadURL();
-          await FirebaseFirestore.instance
-              .collection('workshops')
-              .doc(widget.workshopId)
-              .collection('cutPlans')
-              .doc(planId)
-              .update({'pdfUrl': url});
-          debugPrint('Cut plan PDF uploaded: $url');
-        } catch (err) {
-          debugPrint('PDF storage upload skipped: $err');
-        }
       }
     } catch (e) {
       if (mounted) {
@@ -671,258 +424,5 @@ class _CutPlanScreenState extends ConsumerState<CutPlanScreen> {
     } finally {
       if (mounted) setState(() => _isSaving = false);
     }
-  }
-
-  Future<void> _confirmRecalculate({
-    required BuildContext context,
-    required Project? project,
-    required List<ProjectUnit> units,
-    required SavedCutPlan savedPlan,
-    required CutOptimizer optimizer,
-    required List<CutPiece> allPieces,
-    required List<RemnantDoc> availableRemnants,
-    required String effectiveWorkshopId,
-  }) async {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) {
-        return Container(
-          decoration: BoxDecoration(
-            color: isDark ? AppColors.darkSurface : Colors.white,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-          ),
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
-            left: 20,
-            right: 20,
-            top: 16,
-          ),
-          child: SafeArea(
-            top: false,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Center(
-                  child: Container(
-                    width: 44,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: isDark ? AppColors.slate700 : AppColors.slate300,
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 18),
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: AppColors.warning.withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: const Icon(Icons.handyman_rounded, color: AppColors.warning, size: 24),
-                    ),
-                    const SizedBox(width: 12),
-                    const Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'إرشاد مهني: هل قُصت النوافذ السابقة بالفعل؟',
-                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                          ),
-                          Text(
-                            'تطبيق المنطق الصناعي السليم في ورشة الألمنيوم',
-                            style: TextStyle(fontSize: 12, color: AppColors.slate400),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 14),
-                Text(
-                  'الواقع في الورشة: لا يمكنك فيزيائياً خلط القديم بالجديد إذا كان عامل المنشار قد قص النوافذ القديمة، لأنها أصبحت قطعاً مقصوصة ومنتهية وفضلتها قد تكون استُهلكت بالفعل في مشروع آخر! إعادة الحساب الشامل ستدمج قطعاً من القديم والجديد في قضبان خام مشتركة، وهذا مستحيل تنفيذه.',
-                  style: TextStyle(fontSize: 13, color: isDark ? AppColors.slate300 : AppColors.slate600, height: 1.45),
-                ),
-                const SizedBox(height: 18),
-
-                // Option 1: Move new unit(s) to Batch 2 (Recommended if cut)
-                InkWell(
-                  onTap: () async {
-                    Navigator.pop(ctx);
-                    await _splitToBatchProject(
-                      context: context,
-                      project: project,
-                      units: units,
-                      savedPlan: savedPlan,
-                      workshopId: effectiveWorkshopId,
-                    );
-                  },
-                  borderRadius: BorderRadius.circular(16),
-                  child: Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: AppColors.amberPrimary.withValues(alpha: 0.08),
-                      border: Border.all(color: AppColors.amberPrimary.withValues(alpha: 0.5), width: 1.5),
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.inventory_2_outlined, color: AppColors.amberPrimary, size: 28),
-                        const SizedBox(width: 14),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  const Expanded(
-                                    child: Text(
-                                      'نعم، قُصت بالفعل (فصل كدفعة ثانية)',
-                                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 6),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                    decoration: BoxDecoration(
-                                      color: AppColors.amberPrimary,
-                                      borderRadius: BorderRadius.circular(4),
-                                    ),
-                                    child: const Text('موصى به بالورشة', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                'نقل النوافذ الجديدة إلى مشروع ملحق باسم «${project?.name ?? "المشروع"} (دفعة 2)» لحساب خطة مستقلة تسحب من المخزن والفضلات الحالية، مع بقاء ما تم قصه محفوظاً وسليماً دون تغيير.',
-                                style: TextStyle(fontSize: 12, color: isDark ? AppColors.slate300 : AppColors.slate600, height: 1.35),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: AppColors.amberPrimary),
-                      ],
-                    ),
-                  ),
-                ),
-
-                const SizedBox(height: 12),
-
-                // Option 2: Full recalculation (if not cut yet)
-                InkWell(
-                  onTap: () {
-                    Navigator.pop(ctx);
-                    _regenerate(optimizer, allPieces, availableRemnants);
-                  },
-                  borderRadius: BorderRadius.circular(16),
-                  child: Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: isDark ? AppColors.slate700.withValues(alpha: 0.3) : AppColors.slate100,
-                      border: Border.all(color: AppColors.slate300.withValues(alpha: 0.5)),
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.refresh_rounded, color: AppColors.slate400, size: 28),
-                        const SizedBox(width: 14),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text(
-                                'لا، لم تُقص بعد في الورشة (كانت مجرد خطة)',
-                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                'إذا كان المشروع بأكمله لم يُقص بعد في الواقع، فسيتم خلط كافة القطع وإعادة الحساب الشامل لتحقيق أعلى نسبة توفير للألمنيوم.',
-                                style: TextStyle(fontSize: 12, color: isDark ? AppColors.slate400 : AppColors.slate500, height: 1.35),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: AppColors.slate400),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  Future<void> _splitToBatchProject({
-    required BuildContext context,
-    required Project? project,
-    required List<ProjectUnit> units,
-    required SavedCutPlan savedPlan,
-    required String workshopId,
-  }) async {
-    if (project == null) return;
-
-    // Identify newly added units (created after saved plan was generated)
-    final newUnits = units.where((u) => u.createdAt.isAfter(savedPlan.generatedAt)).toList();
-    final unitsToMove = newUnits.isNotEmpty ? newUnits : [units.last];
-
-    final repo = ref.read(projectsRepositoryProvider);
-
-    // Create the batch project
-    final batchProject = Project(
-      id: '',
-      workshopId: workshopId,
-      name: '${project.name} (دفعة 2)',
-      clientName: project.clientName,
-      clientPhone: project.clientPhone,
-      location: project.location,
-      status: 'in_progress',
-      unitCount: 0,
-      createdAt: DateTime.now(),
-      updatedAt: DateTime.now(),
-    );
-
-    final newProjectId = await repo.createProject(batchProject);
-
-    // Move units to the new project
-    for (final unit in unitsToMove) {
-      final unitForBatch = unit.copyWith(
-        id: '',
-        projectId: newProjectId,
-        createdAt: DateTime.now(),
-        updatedAt: DateTime.now(),
-      );
-      await repo.saveUnit(workshopId, unitForBatch);
-      await repo.deleteUnit(workshopId, widget.projectId, unit.id);
-    }
-
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('تم إنشاء «${batchProject.name}» ونقل ${unitsToMove.length} وحدة إليها بنجاح ✅'),
-          backgroundColor: AppColors.success,
-        ),
-      );
-      context.push('/dashboard/owner/projects/$newProjectId/cut-plan?workshopId=$workshopId');
-    }
-  }
-
-  void _openProjectRequirements(
-    BuildContext context,
-    String workshopId,
-  ) {
-    context.push(
-      '/dashboard/owner/projects/${widget.projectId}/requirements?workshopId=$workshopId',
-    );
   }
 }

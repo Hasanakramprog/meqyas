@@ -8,6 +8,7 @@ class CutPiece {
   final String profileType; // 'track', 'jamb', 'sash', 'screen', 'bead'
   final String? ruleVersionId;
   final String? unitTag; // e.g. "W1", "شباك 1"
+  final String? color; // e.g. 'white', 'black', 'champagne', 'bronze'
 
   const CutPiece({
     required this.itemCode,
@@ -19,6 +20,7 @@ class CutPiece {
     required this.profileType,
     this.ruleVersionId,
     this.unitTag,
+    this.color,
   });
 
   double get totalLengthCm => lengthCm * quantity;

@@ -48,6 +48,7 @@ class RequirementsService {
     ProjectDefaults? projectDefaults,
     List<CalculationRule>? workshopRules,
     OptimizationResult? savedCutPlanResult,
+    List<RemnantStock> availableRemnants = const [],
     DateTime? timestamp,
   }) {
     if (units.isEmpty) return const [];
@@ -72,9 +73,20 @@ class RequirementsService {
 
     final lines = <RequirementLine>[];
     final allCutPieces = <CutPiece>[];
-    final pieceCountByItemCode = <String, int>{};
+    final pieceCountByItemColor = <String, int>{};
     final itemArabicNames = <String, String>{};
+
+    const coloredAccessoryCodes = {
+      'glass_handle',
+      'screen_handle',
+      'shankal_plug',
+      'water_plug',
+      'rakilaj_plug',
+      'fixed_plug',
+    };
     final accessoryTotals = <String, int>{};
+    final accessoryCodes = <String, String>{};
+    final accessoryColors = <String, String?>{};
     final accessoryNames = <String, String>{};
     final accessoryUnits = <String, String>{};
 
@@ -83,7 +95,15 @@ class RequirementsService {
     final glassPanesByKey = <String, int>{};
     final glassLabelByKey = <String, String>{};
 
-    var totalScreenCount = 0;
+    // Group mesh roll demands by (meshType, rollWidthCm)
+    final meshScreensByKey = <String, int>{};
+    final meshLengthCmByKey = <String, double>{};
+    final meshTypeByKey = <String, String>{};
+    final meshWidthByKey = <String, int>{};
+
+    // Group brush roll demands by brushColor
+    final brushScreensByColor = <String, int>{};
+    final brushSashesByColor = <String, int>{};
 
     for (final unit in units) {
       final effectiveEngine = workshopRules != null
@@ -96,18 +116,49 @@ class RequirementsService {
             )
           : engine;
       final calc = effectiveEngine.calculate(unit.toEngineSpec(projectDefaults));
+
+      final bColor = unit.brushColor.trim().isNotEmpty ? unit.brushColor.trim() : 'أسود';
+      brushSashesByColor[bColor] =
+          (brushSashesByColor[bColor] ?? 0) + (unit.sashCount * unit.quantity);
+
       if (unit.hasScreen && unit.screenCount > 0) {
-        totalScreenCount += unit.screenCount * unit.quantity;
+        final unitScreens = unit.screenCount * unit.quantity;
+        brushScreensByColor[bColor] =
+            (brushScreensByColor[bColor] ?? 0) + unitScreens;
+
+        final svPiece =
+            calc.pieces.where((p) => p.itemCode == 'screen_vertical').firstOrNull;
+        final shPiece =
+            calc.pieces.where((p) => p.itemCode == 'screen_horizontal').firstOrNull;
+        final screenH = svPiece?.lengthCm ?? (unit.heightCm - 4.1).clamp(10.0, 400.0);
+        final screenW = shPiece?.lengthCm ?? (((unit.widthCm - 2.5) / 2) + 2).clamp(10.0, 400.0);
+
+        final mType = unit.meshType == 'aluminum' ? 'aluminum' : 'fiber';
+        final resolvedWidth = unit.meshRollWidthCm > 0
+            ? unit.meshRollWidthCm
+            : _pickBestMeshRollWidth(mType, screenW, screenH);
+        final cutAdvanceCm =
+            _advanceAlongRollCm(resolvedWidth.toDouble(), screenW, screenH);
+        final meshKey = '${mType}_$resolvedWidth';
+        meshTypeByKey[meshKey] = mType;
+        meshWidthByKey[meshKey] = resolvedWidth;
+        meshScreensByKey[meshKey] = (meshScreensByKey[meshKey] ?? 0) + unitScreens;
+        meshLengthCmByKey[meshKey] =
+            (meshLengthCmByKey[meshKey] ?? 0.0) + (cutAdvanceCm * unitScreens);
       }
+
+      final unitColor =
+          normalizeProfileColor(unit.effectiveColor(projectDefaults));
 
       // 1. Collect profile pieces
       for (final piece in calc.pieces) {
         final totalPieceQty = piece.quantity * unit.quantity;
         if (totalPieceQty <= 0) continue;
 
+        final pKey = '${piece.itemCode}::$unitColor';
         itemArabicNames[piece.itemCode] = piece.nameArabic;
-        pieceCountByItemCode[piece.itemCode] =
-            (pieceCountByItemCode[piece.itemCode] ?? 0) + totalPieceQty;
+        pieceCountByItemColor[pKey] =
+            (pieceCountByItemColor[pKey] ?? 0) + totalPieceQty;
 
         allCutPieces.add(
           CutPiece(
@@ -120,6 +171,7 @@ class RequirementsService {
             profileType: piece.profileType,
             ruleVersionId: piece.ruleVersionId,
             unitTag: unit.name,
+            color: unitColor,
           ),
         );
       }
@@ -146,40 +198,55 @@ class RequirementsService {
             'زجاج ${_glassTypeArabic(gType)} $gThick ملم (${_glazingModeArabic(gMode)})';
       }
 
-      // 3. Collect accessories
+      // 3. Collect accessories (color-matched for visible handles & plugs)
       for (final acc in calc.accessories) {
         final count = acc.quantity * unit.quantity;
         if (count <= 0) continue;
-        accessoryTotals[acc.code] = (accessoryTotals[acc.code] ?? 0) + count;
-        accessoryNames[acc.code] = acc.nameArabic;
-        accessoryUnits[acc.code] = acc.unit;
+        final isColored = coloredAccessoryCodes.contains(acc.code);
+        final accKey = isColored ? '${acc.code}::$unitColor' : acc.code;
+        accessoryTotals[accKey] = (accessoryTotals[accKey] ?? 0) + count;
+        accessoryCodes[accKey] = acc.code;
+        accessoryColors[accKey] = isColored ? unitColor : null;
+        accessoryNames[accKey] = acc.nameArabic;
+        accessoryUnits[accKey] = acc.unit;
       }
     }
 
-    // Compute new 660 cm bars needed per itemCode (excluding shelf remnants)
-    final optResult =
-        savedCutPlanResult ?? optimizer.optimize(pieces: allCutPieces);
-    final barsByItemCode = <String, int>{};
-    final remnantsUsedByItemCode = <String, int>{};
+    // Compute new 660 cm bars needed per (itemCode, color) (excluding shelf remnants)
+    final optResult = savedCutPlanResult ??
+        optimizer.optimize(
+          pieces: allCutPieces,
+          availableRemnants: availableRemnants,
+        );
+    final barsByItemColor = <String, int>{};
+    final remnantsUsedByItemColor = <String, int>{};
+    final barItemCodes = <String, String>{};
+    final barColors = <String, String>{};
 
     for (final bar in optResult.barPlans) {
+      final normColor = normalizeProfileColor(bar.color);
+      final key = '${bar.itemCode}::$normColor';
+      barItemCodes[key] = bar.itemCode;
+      barColors[key] = normColor;
       if (bar.isFromRemnant) {
-        remnantsUsedByItemCode[bar.itemCode] =
-            (remnantsUsedByItemCode[bar.itemCode] ?? 0) + 1;
+        remnantsUsedByItemColor[key] =
+            (remnantsUsedByItemColor[key] ?? 0) + 1;
       } else {
-        barsByItemCode[bar.itemCode] = (barsByItemCode[bar.itemCode] ?? 0) + 1;
+        barsByItemColor[key] = (barsByItemColor[key] ?? 0) + 1;
       }
     }
 
-    // 1. Aluminum Bar RequirementLines
-    for (final entry in barsByItemCode.entries) {
-      final itemCode = entry.key;
+    // 1. Aluminum Bar RequirementLines (grouped by profile + color)
+    for (final entry in barsByItemColor.entries) {
+      final key = entry.key;
+      final itemCode = barItemCodes[key]!;
+      final barColor = barColors[key]!;
       final barsNeeded = entry.value;
       if (barsNeeded <= 0) continue;
 
       final cat = findCatalogByEngineCode(itemCode);
-      final pieceCount = pieceCountByItemCode[itemCode] ?? 0;
-      final remnantsCount = remnantsUsedByItemCode[itemCode] ?? 0;
+      final pieceCount = pieceCountByItemColor[key] ?? 0;
+      final remnantsCount = remnantsUsedByItemColor[key] ?? 0;
       final reqQty = barsNeeded.toDouble();
 
       final noteParts = <String>[];
@@ -190,13 +257,18 @@ class RequirementsService {
         noteParts.add('تم استثناء $remnantsCount فضلة مستخدمة من الرف');
       }
 
+      final baseName = cat?.arabicName ??
+          '${itemArabicNames[itemCode] ?? itemCode} (قضيب 6.6م)';
+      final colorLabel = profileColorLabelAr(barColor);
+
       lines.add(
         RequirementLine(
-          id: 'auto_al_$itemCode',
-          itemId: cat?.id ?? 'cat_al_$itemCode',
+          id: 'auto_al_${itemCode}_$barColor',
+          itemId: cat?.id != null
+              ? '${cat!.id}_$barColor'
+              : 'cat_al_${itemCode}_$barColor',
           engineItemCode: itemCode,
-          nameArabic: cat?.arabicName ??
-              '${itemArabicNames[itemCode] ?? itemCode} (قضيب 6.6م)',
+          nameArabic: '$baseName — $colorLabel',
           category: 'aluminum',
           requiredQty: reqQty,
           inStockQty: 0,
@@ -244,7 +316,9 @@ class RequirementsService {
 
     // 3. Accessories RequirementLines
     for (final entry in accessoryTotals.entries) {
-      final code = entry.key;
+      final accKey = entry.key;
+      final code = accessoryCodes[accKey] ?? accKey;
+      final accColor = accessoryColors[accKey];
       final totalQty = entry.value;
       if (totalQty <= 0) continue;
 
@@ -257,17 +331,27 @@ class RequirementsService {
                   ? 'plastic'
                   : 'accessories'));
 
+      final baseName = cat?.arabicName ?? (accessoryNames[accKey] ?? code);
+      final lineName = accColor != null
+          ? '$baseName — ${profileColorLabelAr(accColor)}'
+          : baseName;
+      final lineId =
+          accColor != null ? 'auto_acc_${code}_$accColor' : 'auto_acc_$code';
+      final lineItemId = cat?.id != null
+          ? (accColor != null ? '${cat!.id}_$accColor' : cat!.id)
+          : (accColor != null ? 'cat_acc_${code}_$accColor' : 'cat_acc_$code');
+
       lines.add(
         RequirementLine(
-          id: 'auto_acc_$code',
-          itemId: cat?.id ?? 'cat_acc_$code',
+          id: lineId,
+          itemId: lineItemId,
           engineItemCode: code,
-          nameArabic: cat?.arabicName ?? (accessoryNames[code] ?? code),
+          nameArabic: lineName,
           category: categoryId,
           requiredQty: reqQty,
           inStockQty: 0,
           toBuyQty: reqQty,
-          unit: cat?.unit ?? (accessoryUnits[code] ?? 'piece'),
+          unit: cat?.unit ?? (accessoryUnits[accKey] ?? 'piece'),
           note: '',
           source: 'auto',
           createdAt: now,
@@ -277,40 +361,84 @@ class RequirementsService {
     }
 
     // 4. Mesh & Brush Rolls (Spec §8.7: strictly ROLL unit)
-    if (totalScreenCount > 0) {
-      final meshCat = findCatalogByEngineCode('fiber_mesh_roll');
+    for (final entry in meshScreensByKey.entries) {
+      final meshKey = entry.key;
+      final screensCount = entry.value;
+      if (screensCount <= 0) continue;
+
+      final mType = meshTypeByKey[meshKey] ?? 'fiber';
+      final widthCm = meshWidthByKey[meshKey] ?? 120;
+      final rollLengthMeters = mType == 'aluminum' ? 25 : 20;
+      final rollLengthCm = rollLengthMeters * 100.0;
+      final totalNeededCm = meshLengthCmByKey[meshKey] ?? 0.0;
+      final rollsNeeded =
+          totalNeededCm > 0 ? (totalNeededCm / rollLengthCm).ceil().clamp(1, 999) : 1;
+
+      final typeAr = mType == 'aluminum' ? 'ألمنيوم' : 'فيبر';
+      final engineCode = mType == 'aluminum' ? 'aluminum_mesh_roll' : 'fiber_mesh_roll';
+      final meshCat = findCatalogByEngineCode(engineCode);
+
       lines.add(
         RequirementLine(
-          id: 'auto_fb_fiber_mesh_roll',
-          itemId: meshCat?.id ?? 'cat_fb_mesh_120',
-          engineItemCode: 'fiber_mesh_roll',
+          id: 'auto_fb_${engineCode}_$widthCm',
+          itemId: meshCat?.id ?? 'cat_fb_${mType}_$widthCm',
+          engineItemCode: engineCode,
           nameArabic:
-              meshCat?.arabicName ?? 'لفة شبك منخل فيبر عرض 120 سم × 20 م',
+              'لفة شبك منخل $typeAr عرض $widthCm سم × $rollLengthMeters م',
           category: 'fiber',
-          requiredQty: 1,
+          requiredQty: rollsNeeded.toDouble(),
           inStockQty: 0,
-          toBuyQty: 1,
+          toBuyQty: rollsNeeded.toDouble(),
           unit: 'roll',
-          note: 'لعدد $totalScreenCount ضلفة منخل · باللفة فقط (Spec §8.7)',
+          note: 'لعدد $screensCount ضلفة منخل · باللفة فقط (Spec §8.7)',
           source: 'auto',
           createdAt: now,
           updatedAt: now,
         ),
       );
+    }
 
+    for (final entry in brushScreensByColor.entries) {
+      final colorLabel = entry.key;
+      final screensCount = entry.value;
+      if (screensCount <= 0) continue;
       final brushCat = findCatalogByEngineCode('brush_450_roll');
       lines.add(
         RequirementLine(
-          id: 'auto_fb_brush_450_roll',
+          id: 'auto_fb_brush_450_$colorLabel',
           itemId: brushCat?.id ?? 'cat_fb_brush_450',
           engineItemCode: 'brush_450_roll',
-          nameArabic: brushCat?.arabicName ?? 'لفة فراشة منخل 450',
+          nameArabic: 'لفة فراشة منخل 450 ($colorLabel)',
           category: 'fiber',
           requiredQty: 1,
           inStockQty: 0,
           toBuyQty: 1,
           unit: 'roll',
-          note: 'لعدد $totalScreenCount ضلفة منخل · باللفة فقط (Spec §8.7)',
+          note: 'لعدد $screensCount ضلفة منخل · باللفة فقط (Spec §8.7)',
+          source: 'auto',
+          createdAt: now,
+          updatedAt: now,
+        ),
+      );
+    }
+
+    for (final entry in brushSashesByColor.entries) {
+      final colorLabel = entry.key;
+      final sashesCount = entry.value;
+      if (sashesCount <= 0) continue;
+      final brush900Cat = findCatalogByEngineCode('brush_900_roll');
+      lines.add(
+        RequirementLine(
+          id: 'auto_fb_brush_900_$colorLabel',
+          itemId: brush900Cat?.id ?? 'cat_fb_brush_900',
+          engineItemCode: 'brush_900_roll',
+          nameArabic: 'لفة فراشة زجاج 900 ($colorLabel)',
+          category: 'fiber',
+          requiredQty: 1,
+          inStockQty: 0,
+          toBuyQty: 1,
+          unit: 'roll',
+          note: 'لعدد $sashesCount درفة زجاج · باللفة فقط (Spec §8.7)',
           source: 'auto',
           createdAt: now,
           updatedAt: now,
@@ -319,6 +447,37 @@ class RequirementsService {
     }
 
     return sortLines(lines);
+  }
+
+  static int _pickBestMeshRollWidth(
+    String meshType,
+    double screenW,
+    double screenH,
+  ) {
+    final widths = meshType == 'aluminum'
+        ? const [80, 100, 120, 150, 180]
+        : const [80, 100, 120, 150, 214, 240];
+    final minDim = screenW < screenH ? screenW : screenH;
+    final maxDim = screenW > screenH ? screenW : screenH;
+    // Prefer fitting the larger dimension into roll width if close, else smaller dimension
+    for (final w in widths) {
+      if (w >= maxDim) return w;
+    }
+    for (final w in widths) {
+      if (w >= minDim) return w;
+    }
+    return widths.last;
+  }
+
+  static double _advanceAlongRollCm(
+    double rollWidthCm,
+    double screenW,
+    double screenH,
+  ) {
+    final minDim = screenW < screenH ? screenW : screenH;
+    final maxDim = screenW > screenH ? screenW : screenH;
+    if (rollWidthCm >= maxDim) return minDim;
+    return maxDim;
   }
 
   /// Merges freshly calculated [freshAutoLines] into [existingLines] following
