@@ -85,7 +85,7 @@ class _OfflineSyncShellState extends ConsumerState<OfflineSyncShell>
     final status = statusAsync.value ?? OfflineFirestoreHelper.currentStatus;
     final conflictMsg = FirebaseAuthRepository.lastSessionConflictMessage;
 
-    final showBanner = status.isOffline || status.isSyncing || conflictMsg != null;
+    final showBanner = status.isOffline || conflictMsg != null;
 
     return Directionality(
       textDirection: TextDirection.rtl,

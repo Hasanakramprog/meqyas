@@ -12,6 +12,11 @@ abstract class ProjectsRepository {
   Future<String?> findProjectWorkshop(List<String> workshopIds, String projectId);
   Future<String> createProject(Project project);
   Future<void> updateProject(Project project);
+  Future<void> updateProjectDefaults(
+    String workshopId,
+    String projectId,
+    ProjectDefaults defaults,
+  );
   Future<void> deleteProject(String workshopId, String projectId);
 
   Stream<List<ProjectUnit>> watchUnits(String workshopId, String projectId);
@@ -91,6 +96,22 @@ class FirestoreProjectsRepository implements ProjectsRepository {
         'clientPhone': project.clientPhone,
         'location': project.location,
         'status': project.status,
+        'defaults': project.defaults.toMap(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      }),
+    );
+  }
+
+  @override
+  Future<void> updateProjectDefaults(
+    String workshopId,
+    String projectId,
+    ProjectDefaults defaults,
+  ) async {
+    if (workshopId.isEmpty || projectId.isEmpty) return;
+    await OfflineFirestoreHelper.writeOfflineSafe(
+      _projectsCol(workshopId).doc(projectId).update({
+        'defaults': defaults.toMap(),
         'updatedAt': FieldValue.serverTimestamp(),
       }),
     );
@@ -321,7 +342,7 @@ class FirestoreProjectsRepository implements ProjectsRepository {
       // Existing unit update
       final docRef = col.doc(unit.id);
       final batch = _firestore.batch();
-      batch.set(docRef, unit.toMap(), SetOptions(merge: true));
+      batch.set(docRef, unit.toMap());
       batch.set(projectRef, {
         'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));

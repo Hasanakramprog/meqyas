@@ -33,6 +33,8 @@ class RuleValidator {
     'unitType',
     'glazingMode',
     'sharhOption',
+    'sharhAllowance',
+    'sharhDeduction',
     'rollerType',
     'glassType',
     'profileSystemId',

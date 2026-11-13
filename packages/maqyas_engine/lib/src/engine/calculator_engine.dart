@@ -28,7 +28,10 @@ class CalculatorEngine {
         : [
             'track',
             'u_profile',
+            'side',
             'kaab',
+            'handle',
+            'shankal',
             if (spec.hasScreen && spec.screenCount > 0) ...[
               'screen_vertical',
               'screen_horizontal',
@@ -146,10 +149,18 @@ class CalculatorEngine {
             itemCode == 'glass_width') {
           // Glass dimension or intermediate variable, skip adding to cut pieces
         } else {
+          var resolvedArabicName = rule.nameArabic.isNotEmpty
+              ? rule.nameArabic
+              : _arabicNameForItem(itemCode);
+          if (spec.glazingMode == 'double' &&
+              resolvedArabicName.contains('مفرد')) {
+            resolvedArabicName =
+                resolvedArabicName.replaceAll('مفرد', 'دبل');
+          }
           pieces.add(
             CutPiece(
               itemCode: itemCode,
-              nameArabic: rule.nameArabic.isNotEmpty ? rule.nameArabic : _arabicNameForItem(itemCode),
+              nameArabic: resolvedArabicName,
               lengthCm: lengthVal,
               quantity: qtyVal,
               cutAngleLeft: rule.cutAngleLeft,
@@ -296,8 +307,14 @@ class CalculatorEngine {
         return 'سكة 2000 بحاجب';
       case 'u_profile':
         return 'يو 2000';
+      case 'side':
+        return 'جنب 2000 بحاجب';
       case 'kaab':
         return 'كعب 2000 مفرد';
+      case 'handle':
+        return 'مسكة 2000 مفرد';
+      case 'shankal':
+        return 'شنكل 2000 مفرد';
       case 'screen_vertical':
         return 'درفة منخل عامودي';
       case 'screen_horizontal':
@@ -312,8 +329,11 @@ class CalculatorEngine {
       case 'track':
         return 'track';
       case 'u_profile':
+      case 'side':
         return 'jamb';
       case 'kaab':
+      case 'handle':
+      case 'shankal':
         return 'sash';
       case 'screen_vertical':
       case 'screen_horizontal':

@@ -15,6 +15,40 @@ class RulesRepository {
   })  : _firestore = firestore ?? FirebaseFirestore.instance,
         _functions = functions ?? FirebaseFunctions.instance;
 
+  static List<CalculationRule> _mergeWithSeedRules(
+    List<CalculationRule> firestoreRules, {
+    required bool onlyApproved,
+  }) {
+    final seedRules = SeedRules.getSystem2000BeadedRules();
+    if (firestoreRules.isEmpty) {
+      return seedRules;
+    }
+
+    final normalized = firestoreRules.map((r) {
+      // Upgrade legacy single-only kaab rule condition so both single and double work
+      if (r.itemCode == 'kaab' &&
+          r.conditions.length == 1 &&
+          r.conditions.first.trim() == "glazingMode == 'single'") {
+        return r.copyWith(
+          conditions: const ["glazingMode == 'single' || glazingMode == 'double'"],
+        );
+      }
+      return r;
+    }).toList();
+
+    final existingRuleKeys = normalized
+        .where((r) => !onlyApproved || r.isApproved)
+        .map((r) => r.ruleKey)
+        .toSet();
+
+    for (final seed in seedRules) {
+      if (!existingRuleKeys.contains(seed.ruleKey)) {
+        normalized.add(seed);
+      }
+    }
+    return normalized;
+  }
+
   // -------------------------------------------------------------
   // Stream Approved Rules (Global)
   // -------------------------------------------------------------
@@ -24,13 +58,10 @@ class RulesRepository {
         .where('status', isEqualTo: 'approved')
         .snapshots()
         .map((snap) {
-      if (snap.docs.isEmpty) {
-        // Fallback to built-in seed rules if database is empty/fresh
-        return SeedRules.getSystem2000BeadedRules();
-      }
-      return snap.docs
+      final docs = snap.docs
           .map((doc) => CalculationRule.fromMap(doc.data(), docId: doc.id))
           .toList();
+      return _mergeWithSeedRules(docs, onlyApproved: true);
     });
   }
 
@@ -39,9 +70,10 @@ class RulesRepository {
   // -------------------------------------------------------------
   Stream<List<CalculationRule>> watchAllRules() {
     return _firestore.collection('calculationRules').snapshots().map((snap) {
-      return snap.docs
+      final docs = snap.docs
           .map((doc) => CalculationRule.fromMap(doc.data(), docId: doc.id))
           .toList();
+      return _mergeWithSeedRules(docs, onlyApproved: false);
     });
   }
 

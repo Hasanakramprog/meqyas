@@ -335,8 +335,14 @@ class BarLayoutView extends StatelessWidget {
         return 'سكة 2000';
       case 'u_profile':
         return 'يو 2000';
+      case 'side':
+        return 'جنب 2000 بحاجب';
       case 'kaab':
         return 'كعب 2000';
+      case 'handle':
+        return 'مسكة 2000';
+      case 'shankal':
+        return 'شنكل 2000';
       case 'screen_vertical':
         return 'منخل عامودي';
       case 'screen_horizontal':

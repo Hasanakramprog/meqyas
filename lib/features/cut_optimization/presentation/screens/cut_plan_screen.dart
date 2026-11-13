@@ -12,6 +12,7 @@ import '../../../projects/domain/models/project.dart';
 import '../../../projects/domain/models/project_unit.dart';
 import '../../../projects/data/projects_repository.dart';
 import '../../../projects/presentation/screens/project_detail_screen.dart';
+import '../../../projects/presentation/widgets/project_stepper_bar.dart';
 import '../../../reports/data/label_generator.dart';
 import '../../../reports/data/pdf_generator.dart';
 import '../../../rules/data/rules_repository.dart';
@@ -148,7 +149,12 @@ class _CutPlanScreenState extends ConsumerState<CutPlanScreen> {
             }).toList();
 
             // Build cut pieces from all units
-            final allPieces = _buildPieces(units, ref);
+            final allPieces = _buildPieces(
+              units,
+              projectAsync.value,
+              effectiveWorkshopId,
+              ref,
+            );
 
             final currentTotalCuts = allPieces.fold<int>(0, (acc, p) => acc + p.quantity);
             final currentTotalLength = allPieces.fold<double>(0, (acc, p) => acc + (p.lengthCm * p.quantity));
@@ -177,6 +183,12 @@ class _CutPlanScreenState extends ConsumerState<CutPlanScreen> {
 
             return Column(
               children: [
+                if (widget.projectId.isNotEmpty)
+                  ProjectStepperBar(
+                    projectId: widget.projectId,
+                    workshopId: effectiveWorkshopId,
+                    activeStep: 2,
+                  ),
                 // ── Status Banner for Saved Plan ──────────────────────
                 if (_savedAt != null && !_hasUnsavedChanges && hasUnitsChangedSinceSave)
                   Container(
@@ -337,13 +349,27 @@ class _CutPlanScreenState extends ConsumerState<CutPlanScreen> {
     );
   }
 
-  List<CutPiece> _buildPieces(List<ProjectUnit> units, WidgetRef ref) {
-    final engine = ref.read(calculatorEngineProvider(widget.workshopId));
+  List<CutPiece> _buildPieces(
+    List<ProjectUnit> units,
+    Project? project,
+    String workshopId,
+    WidgetRef ref,
+  ) {
+    final workshopRules =
+        ref.read(effectiveRulesProvider(workshopId)).value ??
+            SeedRules.getSystem2000BeadedRules();
+    final defaults = project?.defaults ?? const ProjectDefaults();
     final allPieces = <CutPiece>[];
     for (var i = 0; i < units.length; i++) {
       final u = units[i];
       final label = u.name.trim().isNotEmpty ? u.name.trim() : 'W${i + 1}';
-      final res = engine.calculate(u.toEngineSpec());
+      final unitRules = ProjectUnit.resolveEffectiveRules(
+        workshopRules,
+        projectDefaults: defaults,
+        unitRuleOverrides: u.unitRuleOverrides,
+      );
+      final engine = CalculatorEngine(rules: unitRules);
+      final res = engine.calculate(u.toEngineSpec(defaults));
       for (var copy = 1; copy <= u.quantity; copy++) {
         final tag = u.quantity > 1 ? '$label (#$copy)' : label;
         for (final p in res.pieces) {

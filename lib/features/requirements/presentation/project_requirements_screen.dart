@@ -15,6 +15,7 @@ import '../../orders/domain/order_model.dart';
 import '../../projects/domain/models/project.dart';
 import '../../projects/domain/models/project_unit.dart';
 import '../../projects/presentation/screens/project_detail_screen.dart';
+import '../../projects/presentation/widgets/project_stepper_bar.dart';
 import '../../rules/data/rules_repository.dart';
 import '../../suppliers/data/suppliers_repository.dart';
 import '../../suppliers/domain/supplier.dart';
@@ -44,6 +45,7 @@ class _ProjectRequirementsScreenState
   bool _isExportingPdf = false;
   bool _initialGenerationTriggered = false;
   String _selectedCategoryFilter = 'all';
+  int _activeWizardStep = 3;
 
   String _formatQty(double val) {
     if (val == val.roundToDouble()) {
@@ -92,6 +94,9 @@ class _ProjectRequirementsScreenState
     setState(() => _isGenerating = true);
     try {
       final engine = ref.read(calculatorEngineProvider(workshopId));
+      final workshopRules =
+          ref.read(effectiveRulesProvider(workshopId)).value ??
+              SeedRules.getSystem2000BeadedRules();
       final optimizer =
           ref.read(cuttingOptimizerProvider(workshopId)).value ??
               const CutOptimizer();
@@ -102,6 +107,8 @@ class _ProjectRequirementsScreenState
         engine: engine,
         optimizer: optimizer,
         catalogItems: catalogItems,
+        projectDefaults: project?.defaults,
+        workshopRules: workshopRules,
         savedCutPlanResult: savedCutPlan?.result,
       );
 
@@ -134,6 +141,14 @@ class _ProjectRequirementsScreenState
     setState(() => _isGenerating = true);
     try {
       final engine = ref.read(calculatorEngineProvider(workshopId));
+      final workshopRules =
+          ref.read(effectiveRulesProvider(workshopId)).value ??
+              SeedRules.getSystem2000BeadedRules();
+      final project = ref
+          .read(projectDetailProvider(
+            (workshopId: workshopId, projectId: widget.projectId),
+          ))
+          .value;
       final optimizer =
           ref.read(cuttingOptimizerProvider(workshopId)).value ??
               const CutOptimizer();
@@ -144,6 +159,8 @@ class _ProjectRequirementsScreenState
         engine: engine,
         optimizer: optimizer,
         catalogItems: catalogItems,
+        projectDefaults: project?.defaults,
+        workshopRules: workshopRules,
         savedCutPlanResult: savedCutPlan?.result,
       );
 
@@ -343,6 +360,26 @@ class _ProjectRequirementsScreenState
 
             return Column(
               children: [
+                ProjectStepperBar(
+                  projectId: widget.projectId,
+                  workshopId: workshopId,
+                  activeStep: _activeWizardStep,
+                  onStepTapped: (step) {
+                    if (step == 3 || step == 4) {
+                      setState(() => _activeWizardStep = step);
+                      return;
+                    }
+                    if (step == 1) {
+                      context.go(
+                        '/dashboard/owner/projects/${widget.projectId}?workshopId=$workshopId',
+                      );
+                    } else if (step == 2) {
+                      context.push(
+                        '/dashboard/owner/cut-plan?projectId=${widget.projectId}&workshopId=$workshopId',
+                      );
+                    }
+                  },
+                ),
                 // 1. Staleness Warning Banner
                 if (isStale)
                   Container(

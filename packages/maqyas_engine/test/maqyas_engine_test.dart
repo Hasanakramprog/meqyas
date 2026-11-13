@@ -76,6 +76,51 @@ void main() {
       expect(screenHoriz.lengthCm, closeTo(60.75, 0.001));
       expect(screenHoriz.quantity, equals(2));
     });
+
+    test('side == 155.0 cm (none sharh), qty 2', () {
+      final side = result.pieces.firstWhere((p) => p.itemCode == 'side');
+      expect(side.lengthCm, closeTo(155.0, 0.001));
+      expect(side.quantity, equals(2));
+      expect(side.nameArabic, equals('جنب 2000 بحاجب'));
+    });
+
+    test('handle & shankal == 144.2 cm (H - 5.8), qty 2 each', () {
+      final handle = result.pieces.firstWhere((p) => p.itemCode == 'handle');
+      final shankal = result.pieces.firstWhere((p) => p.itemCode == 'shankal');
+      expect(handle.lengthCm, closeTo(144.2, 0.001));
+      expect(handle.quantity, equals(2));
+      expect(handle.nameArabic, equals('مسكة 2000 مفرد'));
+      expect(shankal.lengthCm, closeTo(144.2, 0.001));
+      expect(shankal.quantity, equals(2));
+      expect(shankal.nameArabic, equals('شنكل 2000 مفرد'));
+    });
+
+    test('sharhOption adjusts side length (+5 / +2.5 / 0) and double swaps Arabic names', () {
+      const oneSideSpec = UnitSpecification(
+        widthCm: 120.0,
+        heightCm: 150.0,
+        sharhOption: 'one_side',
+        glazingMode: 'double',
+        profileSystemId: SeedRules.system2000Beaded,
+      );
+      final oneSideRes = engine.calculate(oneSideSpec);
+      final oneSideJamb = oneSideRes.pieces.firstWhere((p) => p.itemCode == 'side');
+      final doubleHandle = oneSideRes.pieces.firstWhere((p) => p.itemCode == 'handle');
+      final doubleKaab = oneSideRes.pieces.firstWhere((p) => p.itemCode == 'kaab');
+      expect(oneSideJamb.lengthCm, closeTo(152.5, 0.001));
+      expect(doubleHandle.nameArabic, equals('مسكة 2000 دبل'));
+      expect(doubleKaab.nameArabic, equals('كعب 2000 دبل'));
+
+      const twoSidesSpec = UnitSpecification(
+        widthCm: 120.0,
+        heightCm: 150.0,
+        sharhOption: 'two_sides',
+        profileSystemId: SeedRules.system2000Beaded,
+      );
+      final twoSidesRes = engine.calculate(twoSidesSpec);
+      final twoSidesJamb = twoSidesRes.pieces.firstWhere((p) => p.itemCode == 'side');
+      expect(twoSidesJamb.lengthCm, closeTo(150.0, 0.001));
+    });
   });
 
   group('Behavioral Spec Tests', () {

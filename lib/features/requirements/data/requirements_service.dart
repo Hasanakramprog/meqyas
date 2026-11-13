@@ -1,5 +1,6 @@
 import 'package:maqyas_engine/maqyas_engine.dart';
 import '../../catalog/domain/catalog_item.dart';
+import '../../projects/domain/models/project.dart';
 import '../../projects/domain/models/project_unit.dart';
 import '../domain/requirement_line.dart';
 
@@ -44,6 +45,8 @@ class RequirementsService {
     required CalculatorEngine engine,
     required CutOptimizer optimizer,
     required List<CatalogItem> catalogItems,
+    ProjectDefaults? projectDefaults,
+    List<CalculationRule>? workshopRules,
     OptimizationResult? savedCutPlanResult,
     DateTime? timestamp,
   }) {
@@ -83,7 +86,16 @@ class RequirementsService {
     var totalScreenCount = 0;
 
     for (final unit in units) {
-      final calc = engine.calculate(unit.toEngineSpec());
+      final effectiveEngine = workshopRules != null
+          ? CalculatorEngine(
+              rules: ProjectUnit.resolveEffectiveRules(
+                workshopRules,
+                projectDefaults: projectDefaults,
+                unitRuleOverrides: unit.unitRuleOverrides,
+              ),
+            )
+          : engine;
+      final calc = effectiveEngine.calculate(unit.toEngineSpec(projectDefaults));
       if (unit.hasScreen && unit.screenCount > 0) {
         totalScreenCount += unit.screenCount * unit.quantity;
       }
@@ -118,9 +130,12 @@ class RequirementsService {
           calc.glass.paneHeightCm > 0) {
         final panes = calc.glass.quantity * unit.quantity;
         final areaM2 = calc.glass.singlePaneAreaM2 * panes;
-        final gType = unit.glassType.isNotEmpty ? unit.glassType : 'clear';
-        final gThick = unit.glassThicknessMm.toInt();
-        final gMode = unit.glazingMode.isNotEmpty ? unit.glazingMode : 'single';
+        final effGlassType = unit.effectiveGlassType(projectDefaults);
+        final effGlassThick = unit.effectiveGlassThicknessMm(projectDefaults);
+        final effGlazingMode = unit.effectiveGlazingMode(projectDefaults);
+        final gType = effGlassType.isNotEmpty ? effGlassType : 'clear';
+        final gThick = effGlassThick.toInt();
+        final gMode = effGlazingMode.isNotEmpty ? effGlazingMode : 'single';
         final key = 'glass_pane_${gType}_${gThick}mm_$gMode';
 
         glassPanesByKey[key] = (glassPanesByKey[key] ?? 0) + panes;

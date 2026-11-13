@@ -1,27 +1,35 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:maqyas_engine/maqyas_engine.dart';
 import 'package:meqyas/app/theme/app_colors.dart';
 import 'package:meqyas/features/auth/presentation/controllers/auth_controller.dart';
+
 import '../../../../features/rules/data/rules_repository.dart';
 import '../../data/projects_repository.dart';
 import '../../domain/models/project.dart';
 import '../../domain/models/project_unit.dart';
-import 'package:meqyas/features/cut_optimization/data/cut_plan_repository.dart';
-import '../widgets/bar_layout_view.dart';
-import '../widgets/cutting_list_view.dart';
-import 'quick_entry_sheet.dart';
 
-final projectDetailProvider = StreamProvider.autoDispose.family<Project?, ({String workshopId, String projectId})>((ref, arg) {
-  final repo = ref.watch(projectsRepositoryProvider);
-  return repo.watchProject(arg.workshopId, arg.projectId);
-});
+import '../widgets/project_deductions_sheet.dart';
 
-final projectUnitsProvider = StreamProvider.autoDispose.family<List<ProjectUnit>, ({String workshopId, String projectId})>((ref, arg) {
-  final repo = ref.watch(projectsRepositoryProvider);
-  return repo.watchUnits(arg.workshopId, arg.projectId);
-});
+import '../widgets/project_general_properties_card.dart';
+import '../widgets/project_stepper_bar.dart';
+
+final projectDetailProvider = StreamProvider.autoDispose
+    .family<Project?, ({String workshopId, String projectId})>((ref, arg) {
+      final repo = ref.watch(projectsRepositoryProvider);
+      return repo.watchProject(arg.workshopId, arg.projectId);
+    });
+
+final projectUnitsProvider = StreamProvider.autoDispose
+    .family<List<ProjectUnit>, ({String workshopId, String projectId})>((
+      ref,
+      arg,
+    ) {
+      final repo = ref.watch(projectsRepositoryProvider);
+      return repo.watchUnits(arg.workshopId, arg.projectId);
+    });
 
 class ProjectDetailScreen extends ConsumerStatefulWidget {
   final String projectId;
@@ -34,22 +42,39 @@ class ProjectDetailScreen extends ConsumerStatefulWidget {
   });
 
   @override
-  ConsumerState<ProjectDetailScreen> createState() => _ProjectDetailScreenState();
+  ConsumerState<ProjectDetailScreen> createState() =>
+      _ProjectDetailScreenState();
 }
 
-class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> with SingleTickerProviderStateMixin {
-  late final TabController _tabController;
-
-  @override
-  void initState() {
-    super.initState();
-    _tabController = TabController(length: 3, vsync: this);
-  }
-
-  @override
-  void dispose() {
-    _tabController.dispose();
-    super.dispose();
+class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> {
+  Future<void> _addNewItemOfType({
+    required String workshopId,
+    required String unitType,
+    required ProjectDefaults defaults,
+    required List<ProjectUnit> existingUnits,
+  }) async {
+    if (workshopId.isEmpty) return;
+    final nextName = ProjectUnit.nextAutoName(unitType, existingUnits);
+    final newUnit = ProjectUnit(
+      id: '',
+      projectId: widget.projectId,
+      name: nextName,
+      location: '',
+      widthCm: 0.0,
+      heightCm: 0.0,
+      quantity: 1,
+      unitType: unitType,
+      glazingMode: defaults.glazingMode,
+      profileSystemId: defaults.profileSystemId,
+      color: defaults.color,
+      glassType: defaults.glassType,
+      glassThicknessMm: defaults.glassThicknessMm,
+      hasGasket: defaults.hasGasket,
+      overrides: const {},
+      createdAt: DateTime.now(),
+      updatedAt: DateTime.now(),
+    );
+    await ref.read(projectsRepositoryProvider).saveUnit(workshopId, newUnit);
   }
 
   @override
@@ -62,14 +87,16 @@ class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> with 
     final workshops = ref.watch(ownerWorkshopsProvider(ownerUid)).value ?? [];
     final activeId = ref.watch(activeWorkshopIdProvider);
 
-    final workshopId = widget.initialWorkshopId ??
+    final workshopId =
+        widget.initialWorkshopId ??
         activeId ??
-        (workshops.isNotEmpty ? workshops.first.id : (currentUser?.workshopId ?? ''));
+        (workshops.isNotEmpty
+            ? workshops.first.id
+            : (currentUser?.workshopId ?? ''));
 
     final query = (workshopId: workshopId, projectId: widget.projectId);
     final projectAsync = ref.watch(projectDetailProvider(query));
     final unitsAsync = ref.watch(projectUnitsProvider(query));
-    final savedCutPlanAsync = ref.watch(savedCutPlanProvider(query));
 
     return Scaffold(
       appBar: AppBar(
@@ -78,101 +105,23 @@ class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> with 
           loading: () => const Text('جاري التحميل...'),
           error: (_, _) => const Text('المشروع'),
         ),
-        actions: [
-          IconButton(
-            tooltip: 'احتياجات المشروع من المواد',
-            icon: const Icon(
-              Icons.fact_check_rounded,
-              color: AppColors.success,
-            ),
-            onPressed: () {
-              context.push(
-                '/dashboard/owner/projects/${widget.projectId}/requirements?workshopId=$workshopId',
-              );
-            },
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(58),
+          child: ProjectStepperBar(
+            projectId: widget.projectId,
+            workshopId: workshopId,
+            activeStep: 1,
           ),
-          IconButton(
-            tooltip: 'إدخال سريع للقياسات',
-            icon: const Icon(Icons.flash_on_rounded, color: AppColors.amberPrimary),
-            onPressed: () {
-              _onAddUnitRequested(
-                context,
-                workshopId,
-                projectAsync.value,
-                savedCutPlanAsync.value,
-                onContinueSameProject: () {
-                  showModalBottomSheet(
-                    context: context,
-                    isScrollControlled: true,
-                    builder: (_) => QuickEntrySheet(
-                      projectId: widget.projectId,
-                      workshopId: workshopId,
-                    ),
-                  );
-                },
-              );
-            },
-          ),
-          IconButton(
-            tooltip: 'إضافة عنصر بتصميم هندسي كامل',
-            icon: const Icon(Icons.add_rounded),
-            onPressed: () {
-              _onAddUnitRequested(
-                context,
-                workshopId,
-                projectAsync.value,
-                savedCutPlanAsync.value,
-              );
-            },
-          ),
-          IconButton(
-            tooltip: 'خطة القص من المخزن',
-            icon: const Icon(Icons.cut_rounded, color: AppColors.warning),
-            onPressed: () {
-              context.push(
-                '/dashboard/owner/cut-plan?projectId=${widget.projectId}&workshopId=$workshopId',
-              );
-            },
-          ),
-          IconButton(
-            tooltip: 'حذف المشروع',
-            icon: const Icon(Icons.delete_outline_rounded, color: AppColors.error),
-            onPressed: () {
-              _confirmDeleteProject(context, ref, workshopId, projectAsync.value?.name ?? '');
-            },
-          ),
-          const SizedBox(width: 4),
-        ],
-        bottom: TabBar(
-          controller: _tabController,
-          isScrollable: true,
-          tabAlignment: TabAlignment.start,
-          indicatorColor: AppColors.amberPrimary,
-          labelColor: AppColors.amberPrimary,
-          unselectedLabelColor: isDark ? AppColors.slate400 : AppColors.slate600,
-          tabs: const [
-            Tab(icon: Icon(Icons.list_alt_rounded, size: 18), text: 'عناصر القياس'),
-            Tab(icon: Icon(Icons.content_cut_rounded, size: 18), text: 'تقطيع المشروع الكلي'),
-            Tab(icon: Icon(Icons.straighten_rounded, size: 18), text: 'تحسين القضبان 660سم'),
-          ],
         ),
       ),
       body: unitsAsync.when(
         data: (units) {
-          return TabBarView(
-            controller: _tabController,
-            children: [
-              _buildUnitsListTab(
-                context,
-                units,
-                workshopId,
-                isDark,
-                projectAsync.value,
-                savedCutPlanAsync.value,
-              ),
-              _buildProjectCuttingTab(context, units, workshopId),
-              _buildProjectBarsTab(context, units, workshopId),
-            ],
+          return _buildStep1Content(
+            context,
+            units,
+            workshopId,
+            isDark,
+            projectAsync.value,
           );
         },
         loading: () => const Center(child: CircularProgressIndicator()),
@@ -181,565 +130,855 @@ class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> with 
     );
   }
 
-  Widget _buildUnitsListTab(
+  Widget _buildStep1Content(
     BuildContext context,
     List<ProjectUnit> units,
     String workshopId,
     bool isDark,
     Project? project,
-    SavedCutPlan? savedPlan,
   ) {
     final theme = Theme.of(context);
-
-    if (units.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.crop_free_rounded, size: 54, color: isDark ? AppColors.slate600 : AppColors.slate400),
-              const SizedBox(height: 16),
-              Text('لا توجد عناصر قياس مسجلة في هذا المشروع بعد', style: theme.textTheme.titleMedium),
-              const SizedBox(height: 8),
-              Text(
-                'استخدم زر "إدخال سريع" أو "إضافة عنصر" لإدخال أبعاد الشبابيك والواجهات',
-                textAlign: TextAlign.center,
-                style: theme.textTheme.bodySmall?.copyWith(color: AppColors.slate400),
-              ),
-              const SizedBox(height: 24),
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  ElevatedButton.icon(
-                    icon: const Icon(Icons.flash_on_rounded, size: 18),
-                    label: const Text('إدخال سريع'),
-                    onPressed: () {
-                      _onAddUnitRequested(
-                        context,
-                        workshopId,
-                        project,
-                        savedPlan,
-                        onContinueSameProject: () {
-                          showModalBottomSheet(
-                            context: context,
-                            isScrollControlled: true,
-                            builder: (_) => QuickEntrySheet(
-                              projectId: widget.projectId,
-                              workshopId: workshopId,
-                            ),
-                          );
-                        },
-                      );
-                    },
-                  ),
-                  const SizedBox(width: 12),
-                  OutlinedButton.icon(
-                    icon: const Icon(Icons.architecture_rounded, size: 18),
-                    label: const Text('استوديو التصميم 2D'),
-                    onPressed: () {
-                      _onAddUnitRequested(
-                        context,
-                        workshopId,
-                        project,
-                        savedPlan,
-                      );
-                    },
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
-    final effectiveRules = ref.watch(effectiveRulesProvider(workshopId)).value ?? [];
-    final activeRuleIds = effectiveRules.map((r) => r.id).toSet();
-    final hasOutdatedUnit = activeRuleIds.isNotEmpty &&
-        units.any((u) => u.ruleVersionIdsUsed.isNotEmpty && u.ruleVersionIdsUsed.any((id) => !activeRuleIds.contains(id)));
+    final effectiveRules =
+        ref.watch(effectiveRulesProvider(workshopId)).value ??
+        SeedRules.getSystem2000BeadedRules();
+    final defaults = project?.defaults ?? const ProjectDefaults();
 
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        if (hasOutdatedUnit)
+        // 1. General Project Properties Card ("الخصائص العامة للمشروع")
+        ProjectGeneralPropertiesCard(
+          defaults: defaults,
+          workshopRules: effectiveRules,
+          onChanged: (updatedDefaults) {
+            ref
+                .read(projectsRepositoryProvider)
+                .updateProjectDefaults(
+                  workshopId,
+                  widget.projectId,
+                  updatedDefaults,
+                );
+          },
+        ),
+
+        const SizedBox(height: 16),
+
+        // 2. Add Item Type Buttons (شباك / واجهة)
+        Directionality(
+          textDirection: TextDirection.rtl,
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'عناصر المشروع (${units.length})',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.add_rounded, size: 18),
+                label: const Text('إضافة شباك'),
+                onPressed: () => _addNewItemOfType(
+                  workshopId: workshopId,
+                  unitType: 'window',
+                  defaults: defaults,
+                  existingUnits: units,
+                ),
+              ),
+              const SizedBox(width: 8),
+              OutlinedButton.icon(
+                icon: const Icon(Icons.add_rounded, size: 18),
+                label: const Text('إضافة واجهة'),
+                onPressed: () => _addNewItemOfType(
+                  workshopId: workshopId,
+                  unitType: 'facade',
+                  defaults: defaults,
+                  existingUnits: units,
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        const SizedBox(height: 12),
+
+        if (units.isEmpty)
           Container(
-            margin: const EdgeInsets.only(bottom: 16),
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
             decoration: BoxDecoration(
-              color: AppColors.amberPrimary.withValues(alpha: 0.1),
-              border: Border.all(color: AppColors.amberPrimary.withValues(alpha: 0.4)),
-              borderRadius: BorderRadius.circular(10),
+              color: isDark ? AppColors.darkCard : Colors.white,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: isDark ? AppColors.darkBorder : const Color(0xFFE2E8F0),
+              ),
             ),
-            child: const Row(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.info_outline_rounded, color: AppColors.amberPrimary, size: 22),
-                SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    'تنبيه: تم تحديث بعض قواعد الحساب في الورشة منذ حفظ عناصر هذا المشروع. تحتفظ العناصر الحالية بنتائجها السابقة لضمان ثبات التصنيع، ويمكنك فتح أي عنصر وإعادة حفظه لتطبيق القواعد الأحدث.',
-                    style: TextStyle(fontSize: 12, height: 1.4),
+                Icon(
+                  Icons.crop_free_rounded,
+                  size: 48,
+                  color: isDark ? AppColors.slate600 : AppColors.slate400,
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'لا توجد عناصر مضافة في هذا المشروع بعد',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'اضغط "إضافة شباك" أو "إضافة واجهة" لإضافة العناصر (شباك 1، شباك 2، واجهة 1...) وإدخال قياساتها.',
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: AppColors.slate400,
                   ),
                 ),
               ],
             ),
-          ),
-        ...units.map((u) {
-          return Card(
-            margin: const EdgeInsets.only(bottom: 12),
-            child: ListTile(
-              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              leading: Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: AppColors.glassBlue.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: const Icon(Icons.window_rounded, color: AppColors.glassBlueLight),
-              ),
-              title: Text(u.name, style: const TextStyle(fontWeight: FontWeight.w700)),
-              subtitle: Text(
-                '${u.widthCm} × ${u.heightCm} سم • العدد: ${u.quantity} • ${u.glazingMode == "single" ? "مفرد" : "مزدوج"}${u.location.isNotEmpty ? " • ${u.location}" : ""}',
-                style: TextStyle(
-                  color: isDark ? AppColors.slate400 : AppColors.slate600,
-                  fontSize: 12,
-                ),
-              ),
-              trailing: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  IconButton(
-                    tooltip: 'فتح في استوديو التصميم',
-                    icon: const Icon(Icons.tune_rounded, color: AppColors.amberPrimary),
-                    onPressed: () {
-                      context.push('/dashboard/owner/projects/${widget.projectId}/units/${u.id}?workshopId=$workshopId', extra: u);
-                    },
-                  ),
-                  IconButton(
-                    tooltip: 'حذف',
-                    icon: const Icon(Icons.delete_outline_rounded, color: AppColors.error),
-                    onPressed: () async {
-                      final confirm = await showDialog<bool>(
-                        context: context,
-                        builder: (ctx) => AlertDialog(
-                          title: const Text('تأكيد الحذف'),
-                          content: Text('هل أنت متأكد من حذف "${u.name}"؟'),
-                          actions: [
-                            TextButton(onPressed: () => ctx.pop(false), child: const Text('إلغاء')),
-                            ElevatedButton(
-                              style: ElevatedButton.styleFrom(backgroundColor: AppColors.error),
-                              onPressed: () => ctx.pop(true),
-                              child: const Text('حذف'),
-                            ),
-                          ],
-                        ),
-                      );
-                      if (confirm == true) {
-                        await ref.read(projectsRepositoryProvider).deleteUnit(workshopId, widget.projectId, u.id);
-                      }
-                    },
-                  ),
-                ],
-              ),
-              onTap: () {
-                context.push('/dashboard/owner/projects/${widget.projectId}/units/${u.id}?workshopId=$workshopId', extra: u);
-              },
+          )
+        else ...[
+          for (final u in units)
+            _ProjectUnitInlineCard(
+              key: ValueKey(u.id),
+              unit: u,
+              workshopId: workshopId,
+              defaults: defaults,
+              workshopRules: effectiveRules,
             ),
-          );
-        }),
+          const SizedBox(height: 8),
+          ElevatedButton.icon(
+            icon: const Icon(Icons.cut_rounded),
+            label: const Text('التالي: الانتقال إلى 2 · القصّ'),
+            onPressed: () {
+              context.push(
+                '/dashboard/owner/cut-plan?projectId=${widget.projectId}&workshopId=$workshopId',
+              );
+            },
+          ),
+        ],
       ],
     );
   }
+}
 
-  Widget _buildProjectCuttingTab(BuildContext context, List<ProjectUnit> units, String workshopId) {
-    if (units.isEmpty) {
-      return const Center(child: Text('لا توجد عناصر لحساب التتقطيع'));
+/// Inline editable item card for Step 1 ("1 · القياسات").
+/// Starts with width = 0 and height = 0 when newly added, inherits [ProjectDefaults]
+/// automatically, and lets the user customize properties for this specific item or
+/// reset back to the project defaults with one tap.
+class _ProjectUnitInlineCard extends ConsumerStatefulWidget {
+  final ProjectUnit unit;
+  final String workshopId;
+  final ProjectDefaults defaults;
+  final List<CalculationRule> workshopRules;
+
+  const _ProjectUnitInlineCard({
+    super.key,
+    required this.unit,
+    required this.workshopId,
+    required this.defaults,
+    required this.workshopRules,
+  });
+
+  @override
+  ConsumerState<_ProjectUnitInlineCard> createState() =>
+      _ProjectUnitInlineCardState();
+}
+
+class _ProjectUnitInlineCardState
+    extends ConsumerState<_ProjectUnitInlineCard> {
+  late final TextEditingController _nameCtrl;
+  late final TextEditingController _widthCtrl;
+  late final TextEditingController _heightCtrl;
+  late final TextEditingController _locationCtrl;
+  late final FocusNode _widthFocus;
+  late final FocusNode _heightFocus;
+  late final ProjectsRepository _projectsRepo;
+  Timer? _saveDebounce;
+  ProjectUnit? _pendingSaveUnit;
+  bool _showCustomProperties = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _projectsRepo = ref.read(projectsRepositoryProvider);
+    _nameCtrl = TextEditingController(text: widget.unit.name);
+    _widthCtrl = TextEditingController(text: _formatDim(widget.unit.widthCm));
+    _heightCtrl = TextEditingController(text: _formatDim(widget.unit.heightCm));
+    _locationCtrl = TextEditingController(text: widget.unit.location);
+    _widthFocus = FocusNode()..addListener(_onDimFocusChanged);
+    _heightFocus = FocusNode()..addListener(_onDimFocusChanged);
+  }
+
+  void _onDimFocusChanged() {
+    if (!_widthFocus.hasFocus && !_heightFocus.hasFocus) {
+      _flushPendingSave();
     }
+  }
 
-    final engine = ref.watch(calculatorEngineProvider(workshopId));
-    final allPieces = <CutPiece>[];
-    var totalGlassArea = 0.0;
-    var totalGlassWeight = 0.0;
-
-    for (final u in units) {
-      final res = engine.calculate(u.toEngineSpec());
-      for (final p in res.pieces) {
-        // Multiply by unit quantity
-        allPieces.add(
-          CutPiece(
-            itemCode: p.itemCode,
-            nameArabic: p.nameArabic,
-            lengthCm: p.lengthCm,
-            quantity: p.quantity * u.quantity,
-            cutAngleLeft: p.cutAngleLeft,
-            cutAngleRight: p.cutAngleRight,
-            profileType: p.profileType,
-          ),
-        );
+  @override
+  void didUpdateWidget(covariant _ProjectUnitInlineCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.unit.name != widget.unit.name &&
+        _nameCtrl.text != widget.unit.name) {
+      _nameCtrl.text = widget.unit.name;
+    }
+    if (!_widthFocus.hasFocus) {
+      final currentW = double.tryParse(_widthCtrl.text) ?? 0.0;
+      if ((currentW - widget.unit.widthCm).abs() > 0.001) {
+        _widthCtrl.text = _formatDim(widget.unit.widthCm);
       }
-      totalGlassArea += res.glass.totalAreaM2 * u.quantity;
-      totalGlassWeight += res.glass.weightKg * u.quantity;
     }
+    if (!_heightFocus.hasFocus) {
+      final currentH = double.tryParse(_heightCtrl.text) ?? 0.0;
+      if ((currentH - widget.unit.heightCm).abs() > 0.001) {
+        _heightCtrl.text = _formatDim(widget.unit.heightCm);
+      }
+    }
+  }
 
-    final combinedResult = CalculationResult(
-      pieces: allPieces,
-      glass: GlassSpecification(
-        paneWidthCm: 0,
-        paneHeightCm: 0,
-        quantity: units.length,
-        glazingMode: 'combined',
-        glassType: 'various',
-        thicknessMm: 6.0,
-      ),
-      accessories: const [],
-    );
+  static String _formatDim(double val) {
+    if (val == val.roundToDouble()) {
+      return val.toInt().toString();
+    }
+    return val.toStringAsFixed(1);
+  }
 
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        children: [
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text('إجمالي مساحة الزجاج للمشروع', style: TextStyle(fontSize: 12, color: AppColors.slate400)),
-                        const SizedBox(height: 4),
-                        Text('${totalGlassArea.toStringAsFixed(3)} م²', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 18, color: AppColors.glassBlueLight)),
-                      ],
-                    ),
-                  ),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text('إجمالي وزن الزجاج التقريبي', style: TextStyle(fontSize: 12, color: AppColors.slate400)),
-                        const SizedBox(height: 4),
-                        Text('${totalGlassWeight.toStringAsFixed(1)} كغ', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 18, color: AppColors.amberPrimary)),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-          CuttingListView(result: combinedResult),
-        ],
-      ),
+  @override
+  void dispose() {
+    _saveDebounce?.cancel();
+    _flushPendingSave();
+    _widthFocus.removeListener(_onDimFocusChanged);
+    _heightFocus.removeListener(_onDimFocusChanged);
+    _widthFocus.dispose();
+    _heightFocus.dispose();
+    _nameCtrl.dispose();
+    _widthCtrl.dispose();
+    _heightCtrl.dispose();
+    _locationCtrl.dispose();
+    super.dispose();
+  }
+
+  void _scheduleSaveUnit(ProjectUnit updated) {
+    _pendingSaveUnit = updated;
+    _saveDebounce?.cancel();
+    _saveDebounce = Timer(const Duration(milliseconds: 450), () {
+      _flushPendingSave();
+    });
+  }
+
+  void _flushPendingSave() {
+    _saveDebounce?.cancel();
+    _saveDebounce = null;
+    final pending = _pendingSaveUnit;
+    _pendingSaveUnit = null;
+    if (pending != null) {
+      _saveUpdatedUnit(pending);
+    }
+  }
+
+  Future<void> _saveUpdatedUnit(ProjectUnit updated) async {
+    await _projectsRepo.saveUnit(
+      widget.workshopId,
+      updated.copyWith(updatedAt: DateTime.now()),
     );
   }
 
-  Widget _buildProjectBarsTab(BuildContext context, List<ProjectUnit> units, String workshopId) {
-    if (units.isEmpty) {
-      return const Center(child: Text('لا توجد عناصر لحساب القضبان'));
-    }
-
-    final engine = ref.watch(calculatorEngineProvider(workshopId));
-    final optimizer = ref.watch(cuttingOptimizerProvider(workshopId)).value;
-    final allPieces = <CutPiece>[];
-    for (var uIdx = 0; uIdx < units.length; uIdx++) {
-      final u = units[uIdx];
-      final unitLabel = u.name.trim().isNotEmpty ? u.name.trim() : 'W${uIdx + 1}';
-      final res = engine.calculate(u.toEngineSpec());
-      for (var copy = 1; copy <= u.quantity; copy++) {
-        final tag = u.quantity > 1 ? '$unitLabel (#$copy)' : unitLabel;
-        for (final p in res.pieces) {
-          allPieces.add(
-            CutPiece(
-              itemCode: p.itemCode,
-              nameArabic: p.nameArabic,
-              lengthCm: p.lengthCm,
-              quantity: p.quantity,
-              cutAngleLeft: p.cutAngleLeft,
-              cutAngleRight: p.cutAngleRight,
-              profileType: p.profileType,
-              unitTag: tag,
-            ),
-          );
-        }
-      }
-    }
-
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: BarLayoutView(pieces: allPieces, optimizer: optimizer),
-    );
-  }
-
-  Future<void> _confirmDeleteProject(
-    BuildContext context,
-    WidgetRef ref,
-    String workshopId,
-    String projectName,
+  Future<void> _setFieldOverride(
+    String key,
+    dynamic value,
+    dynamic defaultVal,
   ) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Row(
-          children: [
-            Icon(Icons.delete_forever_rounded, color: AppColors.error),
-            SizedBox(width: 8),
-            Text('حذف المشروع'),
-          ],
-        ),
-        content: Text(
-          'هل أنت متأكد من حذف مشروع «$projectName»؟\n\n'
-          'سيتم حذف جميع البيانات المرتبطة به في قاعدة البيانات:\n'
-          '• وحدات القياس والشبابيك\n'
-          '• جدول احتياجات المشروع من المواد\n'
-          '• خطط القص والملفات والفضلات المرتبطة به\n'
-          '• بنود السلة والمسودات المرتبطة بالمشروع',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('إلغاء'),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.error),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('حذف نهائي', style: TextStyle(color: Colors.white)),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed == true && context.mounted) {
-      try {
-        await ref.read(projectsRepositoryProvider).deleteProject(workshopId, widget.projectId);
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('تم حذف المشروع وخطة القص والفضلات بنجاح'),
-              backgroundColor: AppColors.success,
-            ),
-          );
-          context.pop();
-        }
-      } catch (e) {
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('خطأ أثناء حذف المشروع: $e')),
-          );
-        }
-      }
+    final nextOverrides = Map<String, dynamic>.from(widget.unit.overrides);
+    if (value == defaultVal) {
+      nextOverrides.remove(key);
+    } else {
+      nextOverrides[key] = value;
     }
+    await _saveUpdatedUnit(widget.unit.copyWith(overrides: nextOverrides));
   }
 
-  Future<void> _onAddUnitRequested(
-    BuildContext context,
-    String workshopId,
-    Project? project,
-    SavedCutPlan? savedPlan, {
-    VoidCallback? onContinueSameProject,
-  }) async {
-    if (savedPlan == null || project == null) {
-      if (onContinueSameProject != null) {
-        onContinueSameProject();
-      } else {
-        context.push('/dashboard/owner/projects/${widget.projectId}/units/new?workshopId=$workshopId');
-      }
-      return;
-    }
+  Future<void> _resetSingleField(String key) async {
+    final nextOverrides = Map<String, dynamic>.from(widget.unit.overrides)
+      ..remove(key);
+    await _saveUpdatedUnit(widget.unit.copyWith(overrides: nextOverrides));
+  }
 
+  Future<void> _resetAllToDefaults() async {
+    final d = widget.defaults;
+    await _saveUpdatedUnit(
+      widget.unit.copyWith(
+        overrides: const {},
+        glazingMode: d.glazingMode,
+        profileSystemId: d.profileSystemId,
+        color: d.color,
+        glassType: d.glassType,
+        glassThicknessMm: d.glassThicknessMm,
+        hasGasket: d.hasGasket,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final u = widget.unit;
+    final d = widget.defaults;
+    final isCustomized = u.hasAnyOverrides;
 
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) {
-        return Directionality(
-          textDirection: TextDirection.rtl,
-          child: Container(
-            padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(
-              color: isDark ? AppColors.darkCard : Colors.white,
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-            ),
-            child: SafeArea(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
+    final effGlazing = u.effectiveGlazingMode(d);
+    final effColor = u.effectiveColor(d);
+    final effGlass = u.effectiveGlassType(d);
+    final effThick = u.effectiveGlassThicknessMm(d);
+    final effGasket = u.effectiveHasGasket(d);
+
+    final borderColor = isCustomized
+        ? AppColors.amberPrimary.withValues(alpha: 0.65)
+        : (isDark ? AppColors.darkBorder : const Color(0xFFE2E8F0));
+
+    return Directionality(
+      textDirection: TextDirection.rtl,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: isDark ? AppColors.darkCard : Colors.white,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: borderColor,
+            width: isCustomized ? 1.4 : 1.0,
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Header Row: Icon + Name + Default/Custom Badge + Reset + Customize + Delete
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: AppColors.glassBlue.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(
+                    u.unitType == 'facade'
+                        ? Icons.apartment_rounded
+                        : Icons.window_rounded,
+                    size: 20,
+                    color: AppColors.glassBlueLight,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Row(
                     children: [
-                      Container(
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          color: AppColors.warning.withValues(alpha: 0.15),
-                          borderRadius: BorderRadius.circular(12),
+                      Flexible(
+                        child: Text(
+                          u.name,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 15,
+                          ),
                         ),
-                        child: const Icon(Icons.handyman_rounded, color: AppColors.warning, size: 24),
                       ),
-                      const SizedBox(width: 12),
-                      const Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'إرشاد مهني: خطة القص معتمدة ومحفوظة',
-                              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                            ),
-                            Text(
-                              'هل قام عامل المنشار بقص النوافذ السابقة بالفعل؟',
-                              style: TextStyle(fontSize: 12, color: AppColors.slate400),
-                            ),
-                          ],
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 7,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: isCustomized
+                              ? AppColors.amberPrimary.withValues(alpha: 0.16)
+                              : AppColors.slate400.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          isCustomized ? 'مخصص ✎' : 'افتراضي المشروع',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            color: isCustomized
+                                ? AppColors.amberPrimary
+                                : AppColors.slate400,
+                          ),
                         ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 18),
-
-                  // Option A: Batch 2 (Recommended if cut)
-                  InkWell(
-                    onTap: () async {
-                      Navigator.pop(ctx);
-                      final newProjectId = await _createBatchProject(context, ref, project, workshopId);
-                      if (context.mounted) {
-                        context.push('/dashboard/owner/projects/$newProjectId/units/new?workshopId=$workshopId');
-                      }
-                    },
-                    borderRadius: BorderRadius.circular(16),
-                    child: Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: AppColors.amberPrimary.withValues(alpha: 0.08),
-                        border: Border.all(color: AppColors.amberPrimary.withValues(alpha: 0.4)),
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.inventory_2_outlined, color: AppColors.amberPrimary, size: 28),
-                          const SizedBox(width: 14),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  children: [
-                                    const Expanded(
-                                      child: Text(
-                                        'نعم، قُصت بالفعل (المنطق الصناعي السليم)',
-                                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 6),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                      decoration: BoxDecoration(
-                                        color: AppColors.amberPrimary,
-                                        borderRadius: BorderRadius.circular(4),
-                                      ),
-                                      child: const Text('موصى به', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  'لا يمكن فيزيائياً خلط القديم بالجديد؛ لأن النوافذ القديمة أصبحت مقصوصة وفضلتها قد تكون استُهلكت. سيتم إنشاء ملحق باسم «${project.name} (دفعة 2)» لحساب خطة مستقلة للنافذة الجديدة دون المساس بما تم قصه.',
-                                  style: TextStyle(fontSize: 12, color: isDark ? AppColors.slate300 : AppColors.slate600, height: 1.4),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: AppColors.amberPrimary),
-                        ],
-                      ),
+                ),
+                if (isCustomized)
+                  TextButton.icon(
+                    onPressed: _resetAllToDefaults,
+                    icon: const Icon(Icons.restore_rounded, size: 16),
+                    label: const Text(
+                      'استرجاع الافتراضي',
+                      style: TextStyle(fontSize: 11),
                     ),
                   ),
+                TextButton.icon(
+                  onPressed: () => setState(
+                    () => _showCustomProperties = !_showCustomProperties,
+                  ),
+                  icon: Icon(
+                    _showCustomProperties
+                        ? Icons.expand_less_rounded
+                        : Icons.tune_rounded,
+                    size: 16,
+                  ),
+                  label: Text(
+                    _showCustomProperties ? 'إخفاء التخصيص' : 'تخصيص الخصائص',
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'حذف العنصر',
+                  icon: const Icon(
+                    Icons.delete_outline_rounded,
+                    color: AppColors.error,
+                    size: 20,
+                  ),
+                  onPressed: () async {
+                    await ref
+                        .read(projectsRepositoryProvider)
+                        .deleteUnit(widget.workshopId, u.projectId, u.id);
+                  },
+                ),
+              ],
+            ),
 
-                  const SizedBox(height: 12),
+            const SizedBox(height: 10),
 
-                  // Option B: Continue in same project (if not cut yet)
-                  InkWell(
+            // Dimensions Row: العرض (starts at 0), الارتفاع (starts at 0), العدد, عدد الدرف, منخل
+            Row(
+              children: [
+                Expanded(
+                  flex: 3,
+                  child: TextField(
+                    controller: _widthCtrl,
+                    focusNode: _widthFocus,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
                     onTap: () {
-                      Navigator.pop(ctx);
-                      if (onContinueSameProject != null) {
-                        onContinueSameProject();
-                      } else {
-                        context.push('/dashboard/owner/projects/${widget.projectId}/units/new?workshopId=$workshopId');
+                      if (_widthCtrl.text == '0') {
+                        _widthCtrl.selection = TextSelection(
+                          baseOffset: 0,
+                          extentOffset: _widthCtrl.text.length,
+                        );
                       }
                     },
-                    borderRadius: BorderRadius.circular(16),
-                    child: Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: isDark ? AppColors.slate700.withValues(alpha: 0.3) : AppColors.slate100,
-                        border: Border.all(color: AppColors.slate300.withValues(alpha: 0.5)),
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.edit_note_rounded, color: AppColors.slate400, size: 28),
-                          const SizedBox(width: 14),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text(
-                                  'لا، لم تُقص بعد في الورشة (كانت مجرد خطة)',
-                                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  'إذا كان المشروع بأكمله لم يُقص بعد على أرض الواقع، يمكنك إضافة النافذة هنا لنفس المشروع، مع إمكانية إعادة الحساب الكامل لاحقاً للحصول على أعلى نسبة توفير.',
-                                  style: TextStyle(fontSize: 12, color: isDark ? AppColors.slate400 : AppColors.slate500, height: 1.4),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: AppColors.slate400),
-                        ],
+                    decoration: const InputDecoration(
+                      labelText: 'العرض (سم)',
+                      suffixText: 'سم',
+                      isDense: true,
+                      contentPadding: EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 10,
                       ),
                     ),
+                    onChanged: (val) {
+                      final w = double.tryParse(val.trim());
+                      if (w != null && w >= 0) {
+                        final base = _pendingSaveUnit ?? u;
+                        _scheduleSaveUnit(base.copyWith(widthCm: w));
+                      }
+                    },
+                    onEditingComplete: _flushPendingSave,
                   ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  flex: 3,
+                  child: TextField(
+                    controller: _heightCtrl,
+                    focusNode: _heightFocus,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    onTap: () {
+                      if (_heightCtrl.text == '0') {
+                        _heightCtrl.selection = TextSelection(
+                          baseOffset: 0,
+                          extentOffset: _heightCtrl.text.length,
+                        );
+                      }
+                    },
+                    decoration: const InputDecoration(
+                      labelText: 'الارتفاع (سم)',
+                      suffixText: 'سم',
+                      isDense: true,
+                      contentPadding: EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 10,
+                      ),
+                    ),
+                    onChanged: (val) {
+                      final h = double.tryParse(val.trim());
+                      if (h != null && h >= 0) {
+                        final base = _pendingSaveUnit ?? u;
+                        _scheduleSaveUnit(base.copyWith(heightCm: h));
+                      }
+                    },
+                    onEditingComplete: _flushPendingSave,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  flex: 2,
+                  child: DropdownButtonFormField<int>(
+                    isExpanded: true,
+                    initialValue: u.quantity,
+                    decoration: const InputDecoration(
+                      labelText: 'العدد',
+                      isDense: true,
+                      contentPadding: EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 8,
+                      ),
+                    ),
+                    items: List.generate(20, (i) => i + 1)
+                        .map(
+                          (q) => DropdownMenuItem(value: q, child: Text('$q')),
+                        )
+                        .toList(),
+                    onChanged: (q) {
+                      if (q != null) {
+                        _saveUpdatedUnit(u.copyWith(quantity: q));
+                      }
+                    },
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  flex: 2,
+                  child: DropdownButtonFormField<int>(
+                    isExpanded: true,
+                    initialValue: u.sashCount,
+                    decoration: const InputDecoration(
+                      labelText: 'الدرف',
+                      isDense: true,
+                      contentPadding: EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 8,
+                      ),
+                    ),
+                    items: const [
+                      DropdownMenuItem(value: 2, child: Text('2')),
+                      DropdownMenuItem(value: 3, child: Text('3')),
+                      DropdownMenuItem(value: 4, child: Text('4')),
+                    ],
+                    onChanged: (s) {
+                      if (s != null) {
+                        _saveUpdatedUnit(u.copyWith(sashCount: s));
+                      }
+                    },
+                  ),
+                ),
+              ],
+            ),
 
-                  const SizedBox(height: 8),
+            // Expandable Per-Item Customization Section
+            if (_showCustomProperties) ...[
+              const Divider(height: 22),
+              Row(
+                children: [
+                  Expanded(
+                    child: _InlineOverrideDropdown<String>(
+                      label: 'ألمنيوم العنصر',
+                      isOverridden: u.isFieldOverridden('glazingMode'),
+                      onReset: () => _resetSingleField('glazingMode'),
+                      value: effGlazing == 'single' ? 'single' : 'double',
+                      items: const [
+                        DropdownMenuItem(value: 'double', child: Text('دبل')),
+                        DropdownMenuItem(
+                          value: 'single',
+                          child: Text('عادي (مفرد)'),
+                        ),
+                      ],
+                      onChanged: (val) {
+                        if (val != null) {
+                          _setFieldOverride('glazingMode', val, d.glazingMode);
+                        }
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _InlineOverrideDropdown<String>(
+                      label: 'لون العنصر',
+                      isOverridden: u.isFieldOverridden('color'),
+                      onReset: () => _resetSingleField('color'),
+                      value:
+                          ProjectGeneralPropertiesCard.colorOptions.any(
+                            (c) => c.value == effColor,
+                          )
+                          ? effColor
+                          : 'white',
+                      items: ProjectGeneralPropertiesCard.colorOptions
+                          .map(
+                            (c) => DropdownMenuItem(
+                              value: c.value,
+                              child: Text(c.label),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (val) {
+                        if (val != null) {
+                          _setFieldOverride('color', val, d.color);
+                        }
+                      },
+                    ),
+                  ),
                 ],
               ),
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  Future<String> _createBatchProject(
-    BuildContext context,
-    WidgetRef ref,
-    Project parentProject,
-    String workshopId,
-  ) async {
-    final batchProject = Project(
-      id: '',
-      workshopId: workshopId,
-      name: '${parentProject.name} (دفعة 2)',
-      clientName: parentProject.clientName,
-      clientPhone: parentProject.clientPhone,
-      location: parentProject.location,
-      status: 'in_progress',
-      unitCount: 0,
-      createdAt: DateTime.now(),
-      updatedAt: DateTime.now(),
-    );
-    final repo = ref.read(projectsRepositoryProvider);
-    final newId = await repo.createProject(batchProject);
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('تم إنشاء المشروع الملحق: ${batchProject.name} بنجاح ✅'),
-          backgroundColor: AppColors.success,
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    child: _InlineOverrideDropdown<String>(
+                      label: 'نوع زجاج العنصر',
+                      isOverridden: u.isFieldOverridden('glassType'),
+                      onReset: () => _resetSingleField('glassType'),
+                      value:
+                          ProjectGeneralPropertiesCard.glassTypeOptions.any(
+                            (g) => g.value == effGlass,
+                          )
+                          ? effGlass
+                          : 'clear',
+                      items: ProjectGeneralPropertiesCard.glassTypeOptions
+                          .map(
+                            (g) => DropdownMenuItem(
+                              value: g.value,
+                              child: Text(g.label),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (val) {
+                        if (val != null) {
+                          _setFieldOverride('glassType', val, d.glassType);
+                        }
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _InlineOverrideDropdown<double>(
+                      label: 'سماكة زجاج العنصر',
+                      isOverridden: u.isFieldOverridden('glassThicknessMm'),
+                      onReset: () => _resetSingleField('glassThicknessMm'),
+                      value:
+                          ProjectGeneralPropertiesCard.glassThicknessOptions
+                              .any((t) => t.value == effThick)
+                          ? effThick
+                          : 6.0,
+                      items: ProjectGeneralPropertiesCard.glassThicknessOptions
+                          .map(
+                            (t) => DropdownMenuItem(
+                              value: t.value,
+                              child: Text(t.label),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (val) {
+                        if (val != null) {
+                          _setFieldOverride(
+                            'glassThicknessMm',
+                            val,
+                            d.glassThicknessMm,
+                          );
+                        }
+                      },
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    child: _InlineOverrideDropdown<bool>(
+                      label: 'الزبون يدك كوتشوك الزجاج',
+                      isOverridden: u.isFieldOverridden('hasGasket'),
+                      onReset: () => _resetSingleField('hasGasket'),
+                      value: effGasket,
+                      items: const [
+                        DropdownMenuItem(
+                          value: false,
+                          child: Text('لا · لا تضف الكوتشوك للطلبية'),
+                        ),
+                        DropdownMenuItem(
+                          value: true,
+                          child: Text('نعم · أضف الكوتشوك للطلبية'),
+                        ),
+                      ],
+                      onChanged: (val) {
+                        if (val != null) {
+                          _setFieldOverride('hasGasket', val, d.hasGasket);
+                        }
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: DropdownButtonFormField<bool>(
+                      isExpanded: true,
+                      initialValue: u.hasScreen,
+                      decoration: const InputDecoration(
+                        labelText: 'درفة منخل',
+                        isDense: true,
+                        contentPadding: EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 10,
+                        ),
+                      ),
+                      items: const [
+                        DropdownMenuItem(value: true, child: Text('مع منخل')),
+                        DropdownMenuItem(
+                          value: false,
+                          child: Text('بدون منخل'),
+                        ),
+                      ],
+                      onChanged: (val) {
+                        if (val != null) {
+                          _saveUpdatedUnit(u.copyWith(hasScreen: val));
+                        }
+                      },
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Align(
+                alignment: AlignmentDirectional.centerStart,
+                child: OutlinedButton.icon(
+                  icon: Icon(
+                    Icons.tune_rounded,
+                    size: 16,
+                    color: u.unitRuleOverrides.isNotEmpty
+                        ? AppColors.amberPrimary
+                        : null,
+                  ),
+                  label: Text(
+                    u.unitRuleOverrides.isNotEmpty
+                        ? 'تعديل التخسيمات لهذا العنصر (مخصص: ${u.unitRuleOverrides.length})'
+                        : 'تعديل التخسيمات / استرجاع الافتراضي لهذا العنصر',
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                  onPressed: () {
+                    final projectEffectiveRules =
+                        ProjectUnit.resolveEffectiveRules(
+                          widget.workshopRules,
+                          projectDefaults: d,
+                        );
+                    ProjectDeductionsSheet.show(
+                      context: context,
+                      title: 'تعديل التخسيمات لـ "${u.name}"',
+                      subtitle: 'تطبق هذه التخسيمات على هذا العنصر فقط، ويمكنك استرجاع افتراضي المشروع بضغطة زر.',
+                      baseRules: projectEffectiveRules,
+                      currentOverrides: u.unitRuleOverrides,
+                      onSave: (newOverrides) async {
+                        final nextOverrides = Map<String, dynamic>.from(
+                          u.overrides,
+                        );
+                        if (newOverrides.isEmpty) {
+                          nextOverrides.remove('ruleOverrides');
+                        } else {
+                          nextOverrides['ruleOverrides'] = newOverrides;
+                        }
+                        await _saveUpdatedUnit(
+                          u.copyWith(overrides: nextOverrides),
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ],
         ),
-      );
-    }
-    return newId;
+      ),
+    );
   }
 }
 
+class _InlineOverrideDropdown<T> extends StatelessWidget {
+  final String label;
+  final bool isOverridden;
+  final VoidCallback onReset;
+  final T value;
+  final List<DropdownMenuItem<T>> items;
+  final ValueChanged<T?> onChanged;
+
+  const _InlineOverrideDropdown({
+    required this.label,
+    required this.isOverridden,
+    required this.onReset,
+    required this.value,
+    required this.items,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                label,
+                style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            if (isOverridden)
+              InkWell(
+                onTap: onReset,
+                borderRadius: BorderRadius.circular(4),
+                child: const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.restore_rounded,
+                        size: 13,
+                        color: AppColors.info,
+                      ),
+                      SizedBox(width: 2),
+                      Text(
+                        'افتراضي',
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.info,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        DropdownButtonFormField<T>(
+          isExpanded: true,
+          initialValue: value,
+          decoration: const InputDecoration(
+            isDense: true,
+            contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          ),
+          items: items,
+          onChanged: onChanged,
+        ),
+      ],
+    );
+  }
+}

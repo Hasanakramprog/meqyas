@@ -36,6 +36,13 @@ class UnitSpecification {
   });
 
   Map<String, dynamic> toEnvironment() {
+    final sharhAllowance = switch (sharhOption) {
+      'one_side' => 2.5,
+      'two_sides' => 0.0,
+      _ => 5.0,
+    };
+    final sharhDeduction = 5.0 - sharhAllowance;
+
     return {
       'W': widthCm,
       'H': heightCm,
@@ -43,6 +50,8 @@ class UnitSpecification {
       'unitType': unitType,
       'glazingMode': glazingMode,
       'sharhOption': sharhOption,
+      'sharhAllowance': sharhAllowance,
+      'sharhDeduction': sharhDeduction,
       'sashCount': sashCount,
       'screenCount': hasScreen ? screenCount : 0,
       'hasScreen': hasScreen,
