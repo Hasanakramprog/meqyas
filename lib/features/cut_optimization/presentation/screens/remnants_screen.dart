@@ -345,17 +345,24 @@ class _RemnantsScreenState extends ConsumerState<RemnantsScreen> {
     final profileOptions = <({String itemCode, String nameArabic})>[];
     final seenCodes = <String>{};
     for (final r in effectiveRules) {
-      if (r.outputKind == 'profile' && seenCodes.add(r.itemCode)) {
-        profileOptions.add((
-          itemCode: r.itemCode,
-          nameArabic: r.nameArabic.isNotEmpty ? r.nameArabic : r.itemCode,
-        ));
+      if (r.outputKind == 'profile') {
+        final canonCode = canonicalBarItemCode(r.itemCode);
+        if (seenCodes.add(canonCode)) {
+          final displayName = canonicalBarNameArabic(canonCode) ??
+              (r.nameArabic.isNotEmpty ? r.nameArabic : canonCode);
+          profileOptions.add((itemCode: canonCode, nameArabic: displayName));
+        }
       }
     }
     if (profileOptions.isEmpty) {
       for (final r in SeedRules.getSystem2000BeadedRules()) {
-        if (r.outputKind == 'profile' && seenCodes.add(r.itemCode)) {
-          profileOptions.add((itemCode: r.itemCode, nameArabic: r.nameArabic));
+        if (r.outputKind == 'profile') {
+          final canonCode = canonicalBarItemCode(r.itemCode);
+          if (seenCodes.add(canonCode)) {
+            final displayName =
+                canonicalBarNameArabic(canonCode) ?? r.nameArabic;
+            profileOptions.add((itemCode: canonCode, nameArabic: displayName));
+          }
         }
       }
     }

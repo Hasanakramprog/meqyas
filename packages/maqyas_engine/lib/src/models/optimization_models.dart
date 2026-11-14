@@ -60,6 +60,26 @@ String profileColorLabelAr(String raw) {
   }
 }
 
+/// Maps individual cut piece itemCodes to their physical stock bar itemCode.
+/// E.g., 'screen_vertical' and 'screen_horizontal' are cut from the same
+/// physical 'screen_sash' (درفة منخل) bar.
+String canonicalBarItemCode(String itemCode) {
+  switch (itemCode) {
+    case 'screen_vertical':
+    case 'screen_horizontal':
+      return 'screen_sash';
+    default:
+      return itemCode;
+  }
+}
+
+/// Returns a unified Arabic bar name when multiple cut rules share one bar,
+/// or null if the cut piece's own nameArabic should be used.
+String? canonicalBarNameArabic(String barItemCode) {
+  if (barItemCode == 'screen_sash') return 'درفة منخل';
+  return null;
+}
+
 /// Represents a leftover aluminum piece available on the workshop shelf.
 /// Pure Dart — no Firebase imports. The repository layer maps Firestore docs to this.
 class RemnantStock {

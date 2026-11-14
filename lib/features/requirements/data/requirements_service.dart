@@ -58,6 +58,14 @@ class RequirementsService {
       for (final c in catalogItems) {
         if (c.engineItemCode == engineCode) return c;
       }
+      if (engineCode == 'screen_sash') {
+        for (final c in catalogItems) {
+          if (c.engineItemCode == 'screen_vertical' ||
+              c.engineItemCode == 'screen_horizontal') {
+            return c;
+          }
+        }
+      }
       if (engineCode.startsWith('screen_rollers')) {
         for (final c in catalogItems) {
           if (c.engineItemCode == 'screen_rollers') return c;
@@ -155,8 +163,10 @@ class RequirementsService {
         final totalPieceQty = piece.quantity * unit.quantity;
         if (totalPieceQty <= 0) continue;
 
-        final pKey = '${piece.itemCode}::$unitColor';
-        itemArabicNames[piece.itemCode] = piece.nameArabic;
+        final barCode = canonicalBarItemCode(piece.itemCode);
+        final pKey = '$barCode::$unitColor';
+        itemArabicNames[barCode] =
+            canonicalBarNameArabic(barCode) ?? piece.nameArabic;
         pieceCountByItemColor[pKey] =
             (pieceCountByItemColor[pKey] ?? 0) + totalPieceQty;
 
@@ -225,8 +235,9 @@ class RequirementsService {
 
     for (final bar in optResult.barPlans) {
       final normColor = normalizeProfileColor(bar.color);
-      final key = '${bar.itemCode}::$normColor';
-      barItemCodes[key] = bar.itemCode;
+      final barCode = canonicalBarItemCode(bar.itemCode);
+      final key = '$barCode::$normColor';
+      barItemCodes[key] = barCode;
       barColors[key] = normColor;
       if (bar.isFromRemnant) {
         remnantsUsedByItemColor[key] =

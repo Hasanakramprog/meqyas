@@ -142,7 +142,13 @@ class _CartScreenState extends ConsumerState<CartScreen> {
                 )
               : null,
       body: cartAsync.when(
-        data: (items) {
+        data: (rawItems) {
+          final items =
+              (widget.projectId != null && widget.projectId!.isNotEmpty)
+                  ? rawItems
+                      .where((i) => i.sourceProjectId == widget.projectId)
+                      .toList()
+                  : rawItems;
           if (items.isEmpty) {
             return Center(
               child: Padding(
@@ -306,9 +312,13 @@ class _CartScreenState extends ConsumerState<CartScreen> {
                       style: TextStyle(color: AppColors.error),
                     ),
                     onPressed: () async {
-                      await ref
-                          .read(cartRepositoryProvider)
-                          .clearCartItems(workshopId);
+                      await ref.read(cartRepositoryProvider).clearCartItems(
+                            workshopId,
+                            itemIdsToDelete: (widget.projectId != null &&
+                                    widget.projectId!.isNotEmpty)
+                                ? items.map((e) => e.id).toList()
+                                : null,
+                          );
                     },
                   ),
                 ],
@@ -755,6 +765,7 @@ class _CartScreenState extends ConsumerState<CartScreen> {
                         qty: qty,
                         unit: selectedItem.unit,
                         category: selectedItem.categoryId,
+                        sourceProjectId: widget.projectId ?? '',
                         note: noteCtrl.text.trim(),
                         suggestedSupplierId: defaultSupplierId,
                       ),

@@ -43,23 +43,26 @@ class CutOptimizer {
 
     final normDefaultColor = normalizeProfileColor(defaultColor);
 
-    // 1. Group pieces by (itemCode, normalizedColor) so different colors never share bars
+    // 1. Group pieces by (canonicalBarItemCode, normalizedColor) so shared profiles
+    //    (e.g. screen_vertical + screen_horizontal) and matching colors share bars.
     final grouped = <String, List<CutPiece>>{};
     final groupItemCode = <String, String>{};
     final groupColor = <String, String>{};
     for (final p in pieces) {
       final pColor = normalizeProfileColor(p.color ?? normDefaultColor);
-      final key = '${p.itemCode}::$pColor';
+      final barCode = canonicalBarItemCode(p.itemCode);
+      final key = '$barCode::$pColor';
       grouped.putIfAbsent(key, () => []).add(p);
-      groupItemCode[key] = p.itemCode;
+      groupItemCode[key] = barCode;
       groupColor[key] = pColor;
     }
 
-    // 2. Group available remnants by (itemCode, normalizedColor)
+    // 2. Group available remnants by (canonicalBarItemCode, normalizedColor)
     final remnantsByItem = <String, List<RemnantStock>>{};
     for (final r in availableRemnants) {
       final rColor = normalizeProfileColor(r.color);
-      final key = '${r.itemCode}::$rColor';
+      final barCode = canonicalBarItemCode(r.itemCode);
+      final key = '$barCode::$rColor';
       remnantsByItem.putIfAbsent(key, () => []).add(r);
     }
     // Sort each group: longest remnant first

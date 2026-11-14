@@ -23,10 +23,11 @@ class _ItemGroupSectionState extends State<ItemGroupSection> {
 
   @override
   Widget build(BuildContext context) {
-    final baseName = widget.barPlans.isNotEmpty &&
-            widget.barPlans.first.cuts.isNotEmpty
-        ? widget.barPlans.first.cuts.first.nameArabic
-        : widget.itemCode;
+    final baseName = canonicalBarNameArabic(widget.itemCode) ??
+        (widget.barPlans.isNotEmpty &&
+                widget.barPlans.first.cuts.isNotEmpty
+            ? widget.barPlans.first.cuts.first.nameArabic
+            : widget.itemCode);
     final colorLabel = widget.barPlans.isNotEmpty &&
             widget.barPlans.first.color.trim().isNotEmpty
         ? profileColorLabelAr(widget.barPlans.first.color)
@@ -234,9 +235,13 @@ class _BarPlanCard extends StatelessWidget {
               children: bar.cuts.asMap().entries.map((e) {
                 final idx = e.key + 1;
                 final cut = e.value;
+                final dirTag = cut.itemCode == 'screen_vertical'
+                    ? 'عامودي'
+                    : (cut.itemCode == 'screen_horizontal' ? 'أفقي' : null);
                 return Chip(
                   label: Text(
                     '#$idx  ${cut.lengthCm.toStringAsFixed(1)}سم'
+                    '${dirTag != null ? " · $dirTag" : ""}'
                     '${cut.unitTag != null ? " · ${cut.unitTag}" : ""}',
                     style: const TextStyle(fontSize: 11),
                   ),
